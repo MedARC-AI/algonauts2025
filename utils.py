@@ -277,7 +277,7 @@ def align_features_and_fmri_samples(features, fmri, excluded_samples_start,
     """
 
     ### Empty data variables ###
-    aligned_features = []
+    aligned_features = {"visual": [], "audio": [], "language": []}
     aligned_fmri = np.empty((0,1000), dtype=np.float32)
 
     ### Loop across movies ###
@@ -301,9 +301,6 @@ def align_features_and_fmri_samples(features, fmri, excluded_samples_start,
 
             ### Loop over fMRI samples ###
             for s in range(len(fmri_split)):
-                # Empty variable containing the stimulus features of all
-                # modalities for each fMRI sample
-                f_all = np.empty(0)
 
                 ### Loop across modalities ###
                 for mod in features.keys():
@@ -334,7 +331,7 @@ def align_features_and_fmri_samples(features, fmri, excluded_samples_start,
                             idx_end = len(features[mod][split])
                             idx_start = idx_end - stimulus_window
                         f = features[mod][split][idx_start:idx_end]
-                        f_all = np.append(f_all, f.flatten())
+                        aligned_features[mod].append(f)
 
                     ### Language features ###
                     # Since language features already consist of embeddings
@@ -356,13 +353,15 @@ def align_features_and_fmri_samples(features, fmri, excluded_samples_start,
                             f = features[mod][split][-1,:]
                         else:
                             f = features[mod][split][idx]
-                        f_all = np.append(f_all, f.flatten())
+                        
+                        aligned_features[mod].append(f)
 
                  ### Append the stimulus features of all modalities for this sample ###
-                aligned_features.append(f_all)
 
     ### Convert the aligned features to a numpy array ###
-    aligned_features = np.asarray(aligned_features, dtype=np.float32)
+    aligned_features['visual'] = np.asarray(aligned_features['visual'], dtype=np.float32)
+    aligned_features['audio'] = np.asarray(aligned_features['audio'], dtype=np.float32)
+    aligned_features['language'] = np.asarray(aligned_features['language'], dtype=np.float32)
 
     ### Output ###
     return aligned_features, aligned_fmri
