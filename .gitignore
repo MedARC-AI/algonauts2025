@@ -29,6 +29,7 @@ MANIFEST
 checkpoints/
 lightning_logs/
 wandb_logs/
+saved_preds/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
