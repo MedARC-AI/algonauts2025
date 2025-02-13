@@ -1,0 +1,6 @@
+[submodule "vector-quantize-pytorch"]
+	path = vector-quantize-pytorch
+	url = https://github.com/lucidrains/vector-quantize-pytorch.git
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/huggingface/transformers.git
