@@ -8,6 +8,11 @@ from scipy.stats import pearsonr
 from nilearn.maskers import NiftiLabelsMasker
 from nilearn import plotting
 from tqdm import tqdm
+
+def is_interactive():
+    import __main__ as main
+    return not hasattr(main, '__file__')
+
 def preprocess_features(features):
     """
     Rplaces NaN values in the stimulus features with zeros, and z-score the
