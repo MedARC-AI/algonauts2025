@@ -6,8 +6,18 @@ import os
 import h5py
 from scipy.stats import pearsonr
 from nilearn.maskers import NiftiLabelsMasker
+from matplotlib.gridspec import GridSpec
 from nilearn import plotting
 from tqdm import tqdm
+import torch.nn.functional as F
+from sklearn.metrics import r2_score
+import nibabel as nib
+import matplotlib.pyplot as plt
+import math
+from nilearn.maskers import NiftiLabelsMasker
+from torch.utils.data import Dataset
+from collections import defaultdict
+
 def preprocess_features(features):
     """
     Rplaces NaN values in the stimulus features with zeros, and z-score the
@@ -234,8 +244,8 @@ def align_features_and_fmri_samples(features, fmri, excluded_samples_start,
         Integer indicating the last N fMRI TRs that will be excluded and not
         used for model training. The reason for excluding these TRs is that
         stimulus feature samples (i.e., the stimulus chunks) can be shorter than
-        the fMRI samples (i.e., the fMRI TRs), since in some cases the fMRI run
-        ran longer than the actual movie. However, keep in mind that the fMRI
+        the fMRI samples (i.e., the fMRI TRs), since in some cases the fMRI
+        run ran longer than the actual movie. However, keep in mind that the fMRI
         timeseries onset is ALWAYS SYNCHRONIZED with movie onset (i.e., the
         first fMRI TR is always synchronized with the first stimulus chunk).
     hrf_delay : int
@@ -561,3 +571,342 @@ def align_features_and_fmri_samples_friends_s7(features_friends_s7,
             aligned_features_friends_s7[f'sub-0{sub}'][epi] = features_epi
 
     return aligned_features_friends_s7
+
+
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import nibabel as nib
+from nilearn import plotting
+from scipy.stats import pearsonr
+from sklearn.metrics import r2_score
+import torch.nn.functional as F
+import os
+
+def calculate_metrics(pred, target, atlas_path=None, subject=None):
+    """
+    Calculate metrics and plot brain visualizations
+    
+    Args:
+        pred: tensor of shape (1000,) - predicted fMRI activities
+        target: tensor of shape (1000,) - target fMRI activities
+        atlas_path: str - path to atlas NIfTI file (required for visualization)
+        subject: int - subject number to display
+    """
+    # Convert to numpy for sklearn metrics
+    pred_np = pred.float().detach().cpu().numpy()
+    target_np = target.float().detach().cpu().numpy()
+    
+    # Calculate metrics
+    mae = F.l1_loss(pred, target)
+    mse = F.mse_loss(pred, target)
+    r2 = r2_score(target_np, pred_np)
+    pearson_r = pearsonr(pred_np.flatten(), target_np.flatten())[0]
+    
+    if atlas_path is None:
+        return mae, mse, r2, pearson_r, None
+            
+    # Load the atlas image
+    try:
+        atlas_img = nib.load(atlas_path)
+        atlas_data = atlas_img.get_fdata()
+    except Exception as e:
+        print(f"Error loading atlas image: {e}")
+        return mae, mse, r2, pearson_r, None
+    
+    # Create a single integrated figure
+    plt.figure(figsize=(20, 10))
+    
+    # Create nilearn plot objects but don't display them yet
+    # Prepare predicted data
+    pred_data = np.zeros_like(atlas_data)
+    for parcel_index in range(1000):
+        pred_data[atlas_data == (parcel_index + 1)] = pred_np[parcel_index]
+    pred_img = nib.Nifti1Image(pred_data, affine=atlas_img.affine)
+    
+    # Create temporary files for the glass brain plots
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        # Save predicted brain image to temporary file
+        pred_file = os.path.join(tmpdirname, 'pred.png')
+        
+        # Generate the brain plot and save it - no title
+        display_pred = plotting.plot_glass_brain(
+            pred_img,
+            display_mode='lyrz',
+            cmap='inferno',
+            colorbar=True,
+            plot_abs=False,
+            output_file=pred_file,
+            title=None  # Remove title
+        )
+        
+        # Now create our custom figure
+        fig = plt.figure(figsize=(20, 10))
+        
+        # Add the brain image to our main figure, taking the full width
+        ax = fig.add_subplot(111)
+        pred_img = plt.imread(pred_file)
+        ax.imshow(pred_img)
+        ax.axis('off')
+        # Remove title from the axis
+        
+        # Add metrics text in top right with larger font
+        metrics_text = (f'MAE: {mae:.3f}\n'
+                       f'MSE: {mse:.3f}\n'
+                       f'R²: {r2:.3f}\n'
+                       f'Pearson r: {pearson_r:.3f}')
+        plt.figtext(0.98, 0.98, metrics_text,
+                    horizontalalignment='right',
+                    verticalalignment='top',
+                    fontsize=20,  # Increased font size
+                    bbox=dict(facecolor='white', alpha=0.8))
+        
+        # Add subject number in top left with larger font
+        if subject is not None:
+            plt.figtext(0.02, 0.98, f'Subject {subject}',
+                        horizontalalignment='left',
+                        verticalalignment='top',
+                        fontsize=30,  # Increased font size
+                        bbox=dict(facecolor='white', alpha=0.8))
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for the text at the top
+        plt.close()
+    return mae, mse, r2, pearson_r, fig
+
+class CosineLRSchedulerWithWarmup(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, max_lr, min_lr, warmup_steps, max_steps):
+        self.max_lr = max_lr
+        self.min_lr = min_lr
+        self.warmup_steps = warmup_steps
+        self.max_steps = max_steps
+        super().__init__(optimizer)
+    
+    def get_lr(self):
+        it = self._step_count
+        if it < self.warmup_steps:
+            # Linear warmup
+            lr_scale = it / self.warmup_steps
+            return [self.max_lr * lr_scale for _ in self.optimizer.param_groups]
+        
+        if it > self.max_steps:
+            return [self.min_lr for _ in self.optimizer.param_groups]
+        
+        # Cosine decay
+        decay_ratio = (it - self.warmup_steps) / (self.max_steps - self.warmup_steps)
+        assert 0 <= decay_ratio <= 1
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+        return [self.min_lr + coeff * (self.max_lr - self.min_lr) for _ in self.optimizer.param_groups]
+
+    def step(self, epoch=None):
+        # Important: Need to call parent's step
+        return super().step(epoch)
+    
+# def calculate_metrics(pred, target, atlas_path=None, subject=None):
+#     """
+#     Calculate metrics and plot brain visualizations
+    
+#     Args:
+#         pred: tensor of shape (1000,) - predicted fMRI activities
+#         target: tensor of shape (1000,) - target fMRI activities
+#         atlas_path: str - path to atlas NIfTI file (required for visualization)
+#         subject: int - subject number to display
+#     """
+#     # Convert to numpy for sklearn metrics
+#     pred_np = pred.detach().cpu().numpy()
+#     target_np = target.detach().cpu().numpy()
+    
+#     # Calculate metrics
+#     mae = F.l1_loss(pred, target)
+#     mse = F.mse_loss(pred, target)
+#     r2 = r2_score(target_np, pred_np)
+#     pearson_r = pearsonr(pred_np.flatten(), target_np.flatten())[0]
+    
+#     if atlas_path is None:
+#         return mae, mse, r2, pearson_r, None
+            
+#     # Load the atlas image
+#     try:
+#         atlas_img = nib.load(atlas_path)
+#         atlas_data = atlas_img.get_fdata()
+#     except Exception as e:
+#         print(f"Error loading atlas image: {e}")
+#         return mae, mse, r2, pearson_r, None
+    
+#     # Create a single integrated figure
+#     plt.figure(figsize=(20, 10))
+    
+#     # Create nilearn plot objects but don't display them yet
+#     # Prepare predicted data
+#     pred_data = np.zeros_like(atlas_data)
+#     for parcel_index in range(1000):
+#         pred_data[atlas_data == (parcel_index + 1)] = pred_np[parcel_index]
+#     pred_img = nib.Nifti1Image(pred_data, affine=atlas_img.affine)
+    
+#     # Prepare target data
+#     target_data = np.zeros_like(atlas_data)
+#     for parcel_index in range(1000):
+#         target_data[atlas_data == (parcel_index + 1)] = target_np[parcel_index]
+#     target_img = nib.Nifti1Image(target_data, affine=atlas_img.affine)
+    
+#     # Create temporary files for the glass brain plots
+#     import tempfile
+#     with tempfile.TemporaryDirectory() as tmpdirname:
+#         # Save predicted and target brain images to temporary files
+#         pred_file = os.path.join(tmpdirname, 'pred.png')
+#         target_file = os.path.join(tmpdirname, 'target.png')
+        
+#         # Generate the brain plots and save them
+#         display_pred = plotting.plot_glass_brain(
+#             pred_img,
+#             display_mode='lyrz',
+#             cmap='inferno',
+#             colorbar=True,
+#             plot_abs=False,
+#             output_file=pred_file,
+#             title='Predicted fMRI Activity'
+#         )
+        
+#         display_target = plotting.plot_glass_brain(
+#             target_img,
+#             display_mode='lyrz',
+#             cmap='inferno',
+#             colorbar=True,
+#             plot_abs=False,
+#             output_file=target_file,
+#             title='Target fMRI Activity'
+#         )
+        
+#         # Now create our custom figure
+#         fig = plt.figure(figsize=(20, 8))
+        
+#         # Use GridSpec for more control over the layout
+#         gs = GridSpec(1, 2, figure=fig)
+        
+#         # Add the brain images to our main figure
+#         ax1 = fig.add_subplot(gs[0, 0])
+#         pred_img = plt.imread(pred_file)
+#         ax1.imshow(pred_img)
+#         ax1.axis('off')
+#         ax1.set_title('Predicted fMRI Activity', fontsize=16)
+        
+#         ax2 = fig.add_subplot(gs[0, 1])
+#         target_img = plt.imread(target_file)
+#         ax2.imshow(target_img)
+#         ax2.axis('off')
+#         ax2.set_title('Target fMRI Activity', fontsize=16)
+        
+#         # Add metrics text in top right with larger font
+#         metrics_text = (f'MAE: {mae:.3f}\n'
+#                        f'MSE: {mse:.3f}\n'
+#                        f'R²: {r2:.3f}\n'
+#                        f'Pearson r: {pearson_r:.3f}')
+#         plt.figtext(0.98, 0.98, metrics_text,
+#                     horizontalalignment='right',
+#                     verticalalignment='top',
+#                     fontsize=16,
+#                     bbox=dict(facecolor='white', alpha=0.8))
+        
+#         # Add subject number in top left with larger font
+#         if subject is not None:
+#             plt.figtext(0.02, 0.98, f'Subject {subject}',
+#                         horizontalalignment='left',
+#                         verticalalignment='top',
+#                         fontsize=16,
+#                         bbox=dict(facecolor='white', alpha=0.8))
+        
+#         plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for the text at the top
+    
+#     return mae, mse, r2, pearson_r, fig
+
+class AlgonautsDataset(Dataset):
+    def __init__(self, features_dir, fmri_dir, movies, subject, excluded_samples_start=5, excluded_samples_end=5, hrf_delay=3, stimulus_window=5):
+        self.features_dir = features_dir
+        self.fmri_dir = fmri_dir
+        self.movies = movies
+        self.subject = subject
+        self.excluded_samples_start = excluded_samples_start
+        self.excluded_samples_end = excluded_samples_end
+        self.hrf_delay = hrf_delay
+        self.stimulus_window = stimulus_window
+        self.partition_indices = defaultdict(list)
+        
+        # First load all raw features
+        stimuli_features = {"visual": {}, "audio": {}, "language": {}}
+        # Load audio and video features first
+        for movie in self.movies:
+            if 'friends' in movie:
+                season = movie.split('-')[1]
+                dir_list = sorted(os.listdir(self.features_dir + 'audio')) #List of all audio for each subset of dataset
+                for episode in dir_list:
+                    if f"{season}e" in episode and '_features_' in episode:
+                        episode_base = episode.split('_features_')[0] # friends_s01e01 and so on....
+                        
+                        for modality in ['audio', 'visual']:
+                            with h5py.File(os.path.join(self.features_dir, modality, f"{episode_base}_features_{modality}.h5"), 'r') as f:
+                                try:
+                                    stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
+                                except:
+                                    f.visit(lambda x: print(x))
+                lang_dir_list = sorted(os.listdir(self.features_dir + 'language'))
+                for episode in lang_dir_list:
+                    if f"{season}e" in episode and '_features_' in episode:
+                        episode_base = episode.split('_features_')[0]
+                        
+                        with h5py.File(os.path.join(self.features_dir, 'language', f"{episode_base}_features_language.h5"), 'r') as f:
+                            try:
+                                st_season_episode = episode_base.split('_')[1]
+                                stimuli_features['language'][st_season_episode] = f[st_season_episode]['language_pooler_output'][:]
+                            except:
+                                f.visit(lambda x: print(x))
+            else:
+                movie_name = movie.replace('movie10-', '')
+                partitions = sorted([f for f in os.listdir(self.features_dir + 'audio') if movie_name in f and '_features_' in f])
+                
+                for partition in partitions:
+                    partition_base = partition.split('_features_')[0]
+                    
+                    for modality in ['audio', 'visual']:
+                        with h5py.File(os.path.join(self.features_dir, modality, f"{partition_base}_features_{modality}.h5"), 'r') as f:
+                            try:
+                                stimuli_features[modality][partition_base] = f[partition_base][modality][:]
+                            except:
+                                f.visit(lambda x: print(x))
+                lang_partitions = sorted([f for f in os.listdir(self.features_dir + 'language') if movie_name in f and '_features_' in f])
+                
+                for partition in lang_partitions:
+                    partition_base = partition.split('_features_')[0]
+                    
+                    with h5py.File(os.path.join(self.features_dir, 'language', f"{partition_base}_features_language.h5"), 'r') as f:
+                        try:
+                            stimuli_features['language'][partition_base] = f[partition_base]['language_pooler_output'][:]
+                        except:
+                            f.visit(lambda x: print(x))
+
+        fmri_data = load_fmri(self.fmri_dir, self.subject)
+        self.raw_stimuli = stimuli_features
+
+        self.aligned_features, self.aligned_fmri = align_features_and_fmri_samples(
+            stimuli_features, 
+            fmri_data, 
+            self.excluded_samples_start, 
+            self.excluded_samples_end, 
+            self.hrf_delay, 
+            self.stimulus_window, 
+            self.movies
+        )
+
+    def __len__(self):
+        return self.aligned_features['audio'].shape[0]
+
+    def __getitem__(self, idx):
+        return {
+            'audio': self.aligned_features['audio'][idx],
+            'video': self.aligned_features['visual'][idx],
+            'language': self.aligned_features['language'][idx],
+            'fmri': self.aligned_fmri[idx]
+        }
+    
+    def get_raw_stimuli(self):
+        return self.raw_stimuli
