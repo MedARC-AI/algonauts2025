@@ -16,8 +16,6 @@ import argparse
 import sys
 from pathlib import Path
 import requests
-from datalad.api import clone, get
-import kagglehub
 
 # Add path to DeepJuice
 sys.path.append('/home/DeepJuiceDev')
@@ -41,6 +39,13 @@ parser.add_argument('--upload-hf', action='store_true', help='Upload features to
 parser.add_argument('--hf-token', type=str, help='HuggingFace API token')
 parser.add_argument('--list-models', action='store_true', help='List available models in DeepJuice model zoo')
 args = parser.parse_args()
+
+# Make the original import modules optional # JCT 20250408
+if not args.data_dir
+    if args.use_datalad:
+        from datalad.api import clone, get
+    else:
+        import kagglehub
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() and count_cuda_devices() > 0 else 'cpu')
