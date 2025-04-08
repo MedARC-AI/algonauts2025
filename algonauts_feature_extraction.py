@@ -41,7 +41,7 @@ parser.add_argument('--list-models', action='store_true', help='List available m
 args = parser.parse_args()
 
 # Make the original import modules optional # JCT 20250408
-if not args.data_dir
+if not args.data_dir:
     if args.use_datalad:
         from datalad.api import clone, get
     else:
