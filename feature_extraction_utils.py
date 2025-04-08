@@ -4,6 +4,7 @@ from typing import Optional, Callable, Tuple, Any
 from torchvision.datasets.vision import VisionDataset
 
 class VideoDataset(VisionDataset):
+    """
     Args:
         root (string): Enclosing folder where videos are located on the local machine.
         transform (callable, optional): A function/transform that takes in an PIL image
