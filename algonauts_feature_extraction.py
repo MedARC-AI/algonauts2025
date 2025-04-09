@@ -306,7 +306,7 @@ def main():
             try:
                 print(f"Loading model: {model_name}")
                 # Separately pass the pretrained parameter
-                model = get_deepjuice_model(model_name)
+                model, preprocess = get_deepjuice_model(model_name) # if only one output is given it would return a tuple so it will throw an error in the next line
                 model.to(device)
                 model.eval()
                 
