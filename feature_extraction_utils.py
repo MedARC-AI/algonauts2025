@@ -1,8 +1,35 @@
-import os
-import torchvision
 from typing import Optional, Callable, Tuple, Any
 from torchvision.datasets.vision import VisionDataset
+import os
+from pathlib import Path
+import glob
+import re
+import numpy as np
+import pandas as pd
+import h5py
+import torch
+import librosa
+import ast
+import string
+import zipfile
+from tqdm.notebook import tqdm
+from sklearn.linear_model import RidgeCV, Ridge
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from scipy.stats import pearsonr
 import cv2
+import nibabel as nib
+from nilearn import plotting
+from nilearn.maskers import NiftiLabelsMasker
+import ipywidgets as widgets
+from ipywidgets import VBox, Dropdown, Button
+from IPython.display import Video, display, clear_output
+from moviepy.editor import VideoFileClip
+from transformers import BertTokenizer, BertModel
+from torchvision.transforms import Compose, Lambda, CenterCrop
+from torchvision.models.feature_extraction import create_feature_extractor
+from pytorchvideo.transforms import Normalize, UniformTemporalSubsample, ShortSideScale
 def extract_visual_features(episode_path, tr, feature_extractor, model_layer,
     transform, device, save_dir_temp, save_dir_features):
     """
