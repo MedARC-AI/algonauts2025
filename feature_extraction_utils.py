@@ -80,12 +80,12 @@ def extract_visual_features(episode_path, tr, feature_extractor, model_layer,
     visual_features = np.array(visual_features, dtype='float32')
 
     # Save the visual features
-    #out_file_visual = os.path.join(
-    #    save_dir_features, f'friends_s01e01a_features_visual.h5')
-    #with h5py.File(out_file_visual, 'a' if Path(out_file_visual).exists() else 'w') as f:
-    #    group = f.create_group("s01e01a")
-    #    group.create_dataset('visual', data=visual_features, dtype=np.float32)
-    #print(f"Visual features saved to {out_file_visual}")
+    out_file_visual = os.path.join(
+       save_dir_features, f'friends_s01e01a_features_visual.h5')
+    with h5py.File(out_file_visual, 'a' if Path(out_file_visual).exists() else 'w') as f:
+       group = f.create_group("s01e01a")
+       group.create_dataset('visual', data=visual_features, dtype=np.float32)
+    print(f"Visual features saved to {out_file_visual}")
 
     # Output
     return visual_features
