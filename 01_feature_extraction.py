@@ -64,12 +64,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--movie_type', type=str, default='movie10')
 parser.add_argument('--stimulus_type', type=str, default='wolf')
 parser.add_argument('--modality', type=str, default='language')
+parser.add_argument('--model_name', type=str, default='slow_r50')
+parser.add_argument('--model_layer', type=str, default='')
 parser.add_argument('--fps', type=float, default=29.97)
 parser.add_argument('--tr', type=float, default=1.49)
 parser.add_argument('--sr', type=int, default=22050) # original is 44100 for Friends
 parser.add_argument('--num_used_tokens', type=int, default=510)
 parser.add_argument('--kept_tokens_last_hidden_state', type=int, default=10)
 parser.add_argument('--project_dir', default='../algonauts_2025/', type=str)
+parser.add_argument('--save_data_dir', default='./results/', type=str)
 args = parser.parse_args()
 
 print('>>> Extract stimulus features <<<')
@@ -87,11 +90,9 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # =============================================================================
 # Output directory
 # =============================================================================
-save_dir = os.path.join(args.project_dir, 'results', 'stimulus_features',
-	'raw', args.movie_type, args.modality)
-
-if os.path.isdir(save_dir) == False:
-	os.makedirs(save_dir)
+save_data_dir = args.save_data_dir
+if os.path.isdir(save_data_dir) == False:
+	os.makedirs(save_data_dir)
 
 
 # =============================================================================
@@ -109,7 +110,6 @@ elif args.modality == 'language':
 	model = BertModel.from_pretrained('bert-base-uncased')
 	model.eval()
 	model = model.to(device)
-
 
 # =============================================================================
 # Loop over episodes
@@ -130,7 +130,7 @@ for movie_split in tqdm(movie_splits_list):
 			model_layer,
 			transform,
 			device,
-			save_dir
+			save_data_dir
 			)
 
 	elif args.modality == 'audio':
@@ -138,7 +138,7 @@ for movie_split in tqdm(movie_splits_list):
 			args,
 			movie_split,
 			device,
-			save_dir
+			save_data_dir
 			)
 
 	elif args.modality == 'language':
@@ -148,5 +148,5 @@ for movie_split in tqdm(movie_splits_list):
 			model,
 			tokenizer,
 			device,
-			save_dir
+			save_data_dir
 			)
