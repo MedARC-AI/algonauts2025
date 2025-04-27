@@ -9,7 +9,7 @@ import librosa
 import string
 import pandas as pd
 from moviepy.editor import VideoFileClip
-import tqdm
+from tqdm.notebook import tqdm
 import torch
 from torchvision.models.feature_extraction import create_feature_extractor, get_graph_node_names
 from torchvision.transforms import Compose, Lambda, CenterCrop
@@ -21,6 +21,9 @@ emonet_abs_path = os.path.abspath('emonet-pytorch')
 if emonet_abs_path not in sys.path:
     sys.path.insert(0, emonet_abs_path)
 from models import EmoNet
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(device)
 
 def define_frames_transform(args):
     """Define the transform of the video frames for later input to the DNN.
@@ -195,6 +198,7 @@ def extract_visual_features(args, movie_split, feature_extractor, model_layer,
         stim_path = os.path.join(args.project_dir,
             'algonauts_2025.competitors', 'stimuli', 'movies', args.movie_type,
             args.stimulus_type, movie_split+'.mkv')
+    print(stim_path)
     ### Divide the movie in chunks of length TR ###
     clip = VideoFileClip(stim_path)
     start_times = [x for x in np.arange(0, clip.duration, args.tr)][:-1]
@@ -202,37 +206,35 @@ def extract_visual_features(args, movie_split, feature_extractor, model_layer,
     ### Loop over movie chunks ###
     visual_features = []
     # Loop over chunks
-    with tqdm(total=len(start_times), desc="Extracting visual features") as pbar:
-        for start in start_times:
+    for start in start_times:
+        ### Save the chunk clips ###
+        clip_chunk = clip.subclip(start, start + args.tr)
+        chunk_path = os.path.join(temp_dir, 'visual_'+str(args.stimulus_type)+
+            '.mp4')
+        clip_chunk.write_videofile(chunk_path, verbose=False, audio=False,
+        logger=None)
 
-            ### Save the chunk clips ###
-            clip_chunk = clip.subclip(start, start + args.tr)
-            chunk_path = os.path.join(temp_dir, 'visual_'+str(args.stimulus_type)+
-                '.mp4')
-            clip_chunk.write_videofile(chunk_path, verbose=False, audio=False,
-            logger=None)
+        ### Load the video chunk frames ###
+        video_clip = VideoFileClip(chunk_path)
+        chunk_frames = [chunk_frames for chunk_frames in video_clip.iter_frames()]
 
-            ### Load the video chunk frames ###
-            video_clip = VideoFileClip(chunk_path)
-            chunk_frames = [chunk_frames for chunk_frames in video_clip.iter_frames()]
+        ### Format the frames ###
+        if args.model_name == 'emonet':
+            frames_array = np.transpose(np.array(chunk_frames), (0, 3, 1, 2)) # (batch_size, channels, height, width)
+            inputs = torch.from_numpy(frames_array).float()
+            inputs = transform(inputs).to(device)
+        else:
+            # Pytorch video models usually require shape:
+            # [batch_size, channel, number_of_frame, height, width]
+            frames_array = np.transpose(chunk_frames, [3, 0, 1, 2])
+            inputs = torch.from_numpy(frames_array).float()
+            inputs = transform(inputs).unsqueeze(0).to(device)
 
-            ### Format the frames ###
-            if args.model_name == 'emonet':
-                frames_array = np.transpose(np.array(chunk_frames), (0, 3, 1, 2)) # (batch_size, channels, height, width)
-                inputs = torch.from_numpy(frames_array).float()
-                inputs = transform(inputs).to(device)
-            else:
-                # Pytorch video models usually require shape:
-                # [batch_size, channel, number_of_frame, height, width]
-                frames_array = np.transpose(chunk_frames, [3, 0, 1, 2])
-                inputs = torch.from_numpy(frames_array).float()
-                inputs = transform(inputs).unsqueeze(0).to(device)
-
-            ### Extract the visual features ###
-            with torch.no_grad():
-                preds = feature_extractor(inputs)
-            visual_features.append(
-                np.reshape(preds[model_layer].cpu().numpy(), -1))
+        ### Extract the visual features ###
+        with torch.no_grad():
+            preds = feature_extractor(inputs)
+        visual_features.append(
+            np.reshape(preds[model_layer].cpu().numpy(), -1))
 
     ### Format the visual features ###
     visual_features = np.array(visual_features, dtype='float32')
