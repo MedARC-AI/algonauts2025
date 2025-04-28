@@ -89,6 +89,7 @@ def get_vision_model(args, device):
         The layer from which visual features will be extracted.
 
     """
+    model_layer = args.model_layer
 
     # Load the model
     if args.model_name == 'emonet':
@@ -97,15 +98,14 @@ def get_vision_model(args, device):
             model.load_state_dict_from_path('emonet_pytorch_weights.pt')
         else:
             model.load_state_dict_from_web()
-        if not args.model_layer:
+        if not model_layer:
             model_layer = 'classifier.1' # default layer
     else:
         model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name,pretrained=True)
-        if not args.model_layer:
+        if not model_layer:
             if args.model_name=='slow_r50':
                 model_layer = 'blocks.5.pool' # default layer
-        # Add your own function here that matches the training data for your pretrained model
-    
+
     feature_extractor = create_feature_extractor(model,
         return_nodes=[model_layer])
     feature_extractor.to(device)
