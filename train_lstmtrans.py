@@ -26,7 +26,7 @@ torch.manual_seed(seed)  # Choose any number
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(seed)
 
-run_name = "spa_featsel5wind_linproj"
+run_name = "concat_redfeat_transNOCLS_redLR"
 
 print("=== Job Info ===")
 print(datetime.datetime.now().strftime("%a %b %d %I:%M:%S %p UTC %Y"))
@@ -63,7 +63,7 @@ modality = "all"  #@param ["visual", "audio", "language", "all"]
 excluded_samples_start = 5  #@param {type:"slider", min:0, max:20, step:1}
 excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
 hrf_delay = 3  #@param {type:"slider", min:0, max:10, step:1}
-stimulus_window = 10
+stimulus_window = 5
 
 subject = 1 #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
 
@@ -96,52 +96,86 @@ class FMRIPredictor(L.LightningModule):
         super().__init__()
         self.out_features = config['out_features']  # Vocabulary size
         self.learning_rate = config['learning_rate']
-        
-        # Audio processing: LSTM to summarize sequence
-        self.audio_lstm = nn.LSTM(
-            input_size=128, 
-            hidden_size=256, 
-            num_layers=1, 
-            batch_first=True
+        self.vision_dropout = config['vision_dropout']
+        self.fmri_dropout = config['fmri_dropout']
+        self.transformer_dropout = config['transformer_dropout']
+        self.debug = config['debug']
+        self.video_proj = nn.Sequential(
+            nn.Linear(8192, 2048),
+            nn.ReLU(),
+            nn.Dropout(self.vision_dropout),
+            nn.Linear(2048, 1024),
         )
-        self.audio_norm = nn.LayerNorm(128)
-        self.audio_proj = nn.Linear(128, 256)
-        self.audio_attn = nn.MultiheadAttention(embed_dim=128, num_heads=4)
-        
-        # Video processing: Reduce dimensionality, then LSTM
-        # self.video_linear = nn.Linear(8192, 512)
-        self.vision_heads = 64
-        assert 8192 % self.vision_heads == 0
-        self.spatial_vision_proj = nn.Linear(128, 64)
-        self.spatial_vision_attn = nn.MultiheadAttention(embed_dim=64, num_heads=4)
-        self.temporal_vision_dim = self.vision_heads * 64
-        self.temporal_vision_norm = nn.LayerNorm(self.temporal_vision_dim)
-        self.temporal_vision_attn = nn.MultiheadAttention(embed_dim=self.temporal_vision_dim, num_heads=8)
-        self.vision_proj = nn.Linear(self.temporal_vision_dim, 1024)
-        # self.video_lstm = nn.LSTM(
-        #     input_size=512, 
-        #     hidden_size=512, 
+
+        self.audio_proj = nn.Sequential(
+            nn.Linear(128, 256),
+            # nn.ReLU(),
+            # nn.Dropout(self.audio_dropout),
+        )
+
+        # Audio processing: LSTM to summarize sequence
+        # self.audio_lstm = nn.LSTM(
+        #     input_size=128, 
+        #     hidden_size=256, 
         #     num_layers=1, 
         #     batch_first=True
         # )
-        self.text_linear = nn.Linear(768, 256)
-        self.text_norm = nn.LayerNorm(768)
-        # Learnable CLS token for fusion
-        # self.cls_token = nn.Parameter(torch.randn(1, 512))
+
+        self.vector_transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=1536,
+                nhead=8,
+                dim_feedforward=2048,
+                dropout=self.transformer_dropout
+            ),
+            num_layers=2
+        )
+
+        self.text_proj = nn.Linear(768, 256)
+        self.concat_norm = nn.LayerNorm(1536)
+        # self.audio_norm = nn.LayerNorm(128)
+        # self.audio_proj = nn.Linear(128, 256)
+        # self.audio_attn = nn.MultiheadAttention(embed_dim=128, num_heads=4)
         
-        # # Transformer encoder for modality fusion
-        # self.transformer_encoder = nn.TransformerEncoder(
-        #     nn.TransformerEncoderLayer(
-        #         d_model=512, 
-        #         nhead=8, 
-        #         dim_feedforward=2048, 
-        #         dropout=0.1
-        #     ), 
-        #     num_layers=1
-        # )
+        # # Video processing: Reduce dimensionality, then LSTM
+        # # self.video_linear = nn.Linear(8192, 512)
+        # self.vision_heads = 64
+        # assert 8192 % self.vision_heads == 0
+        # self.spatial_vision_proj = nn.Linear(128, 64)
+        # self.spatial_vision_attn = nn.MultiheadAttention(embed_dim=64, num_heads=4)
+        # self.temporal_vision_dim = self.vision_heads * 64
+        # self.temporal_vision_norm = nn.LayerNorm(self.temporal_vision_dim)
+        # self.temporal_vision_attn = nn.MultiheadAttention(embed_dim=self.temporal_vision_dim, num_heads=8)
+        # self.vision_proj = nn.Linear(self.temporal_vision_dim, 1024)
+        # # self.video_lstm = nn.LSTM(
+        # #     input_size=512, 
+        # #     hidden_size=512, 
+        # #     num_layers=1, 
+        # #     batch_first=True
+        # # )
+        # self.text_linear = nn.Linear(768, 256)
+        # self.text_norm = nn.LayerNorm(768)
+        # # Learnable CLS token for fusion
+        # # self.cls_token = nn.Parameter(torch.randn(1, 512))
         
-        # Prediction head: Output logits for 32 tokens
-        self.pred_head = nn.Linear(1536, self.out_features)
+        # # # Transformer encoder for modality fusion
+        # # self.transformer_encoder = nn.TransformerEncoder(
+        # #     nn.TransformerEncoderLayer(
+        # #         d_model=512, 
+        # #         nhead=8, 
+        # #         dim_feedforward=2048, 
+        # #         dropout=0.1
+        # #     ), 
+        # #     num_layers=1
+        # # )
+        
+        # # Prediction head: Output logits for 32 tokens
+        self.pred_head = nn.Sequential(
+            nn.Linear(1536, 1024),
+            nn.ReLU(),
+            nn.Dropout(self.fmri_dropout),
+            nn.Linear(1024, 1000),
+        )
         self.max_lr = config['learning_rate']
         self.min_lr = config['learning_rate'] * 0.01
         self.warmup_steps = config['warmup_steps']
@@ -154,61 +188,19 @@ class FMRIPredictor(L.LightningModule):
         text_missing = torch.isnan(text).any(dim=1)  # Shape: (batch_size,)
         text = torch.nan_to_num(text, nan=0.0)  # Shape: (batch_size, 768)
         
-        audio = audio.transpose(0, 1)  # (seq_len, batch_size, 128)
-        temporal_audio, _ = self.audio_attn(audio, audio, audio)
-        temporal_audio = temporal_audio.transpose(0, 1)  # (batch_size, seq_len, 128)
-        audio_summary = temporal_audio.mean(dim=1)  # (batch_size, 128)
-        audio_norm = self.audio_norm(audio_summary)  # (batch_size, 128)
-        audio_proj = self.audio_proj(audio_norm)  # (batch_size, 256)
-        
-        # print("audio_proj shape: ", audio_proj.shape)
-        
-        # _, (audio_hidden, _) = self.audio_lstm(audio)  # (1, batch_size, 256)
-        # audio_summary = audio_hidden[-1]  # (batch_size, 256)
-        # audio_summary = self.audio_proj(audio_summary)  # (batch_size, 512)
 
-        vision = video.reshape(batch_size, seq_len, self.vision_heads, -1).permute(0, 2, 1, 3).reshape(batch_size * self.vision_heads, seq_len, -1)
-        vision_groups = self.spatial_vision_proj(vision).transpose(0, 1)  # (seq_len, batch_size * self.vision_heads, 64)
-        vision_groups, _ = self.spatial_vision_attn(vision_groups, vision_groups, vision_groups)  # (seq_len, batch_size * self.vision_heads, 64)
-        vision_groups = vision_groups.transpose(0, 1)  # (batch_size * self.vision_heads, seq_len, 64)
-        vision_groups = vision_groups.reshape(batch_size, self.vision_heads, seq_len, -1).permute(0, 2, 1, 3)  # (batch_size, self.vision_heads, seq_len, 64)
-        spatial_vision = vision_groups.reshape(batch_size, seq_len, -1)  # (batch_size, seq_len, 64 * self.vision_heads)
+        vision = self.video_proj(video)
+        audio = self.audio_proj(audio)
+        text = self.text_proj(text).unsqueeze(1).repeat(1, seq_len, 1) #Shape: (batch_size, seq_len, 256)
 
-        spatial_vision = self.temporal_vision_norm(spatial_vision).transpose(0, 1)  # (seq_len, batch_size, 64 * self.vision_heads)
-        temporal_vision, _ = self.temporal_vision_attn(spatial_vision, spatial_vision, spatial_vision)  # (seq_len, batch_size, 64 * self.vision_heads)
-        temporal_vision = temporal_vision.transpose(0, 1)  # (batch_size, seq_len, 64 * self.vision_heads)
-        vision_pool = temporal_vision.mean(dim=1)  # (batch_size, 64 * self.vision_heads)
-        vision_proj = self.vision_proj(vision_pool)  # (batch_size, 1024)
-        # video_reduced = self.video_linear(video)  # (batch_size, 5, 512)
-        # _, (video_hidden, _) = self.video_lstm(video_reduced)  # (1, batch_size, 512)
-        # video_summary = video_hidden[-1]  # (batch_size, 512)
-        # print("vision_proj shape: ", vision_proj.shape)
-        # Step 5: Project text embedding to common dimension
-        text_norm = self.text_norm(text)  # (batch_size, 768)
-        text_proj = self.text_linear(text_norm)  # (batch_size, 256)
-        # print("text_proj shape: ", text_proj.shape)
-        # Step 6: Prepare input for fusion with a CLS token
-        concat_vector = torch.cat([audio_proj, vision_proj, text_proj], dim=1)  # (batch_size, 1536)
-        # cls_token = self.cls_token.expand(batch_size, -1)  # (batch_size, 512)
-        # fusion_input = torch.stack(
-        #     [cls_token, audio_summary, video_summary, text_proj], 
-        #     dim=1
-        # )  # (batch_size, 4, 512)
-        
-        # # Step 7: Create attention mask to ignore text when missing
-        # attn_mask = torch.zeros(batch_size, 4, dtype=torch.bool, device=audio.device)
-        # attn_mask[:, 3] = text_missing  # Mask text position (index 3) if NaN was present
-        
-        # # Step 8: Fuse modalities with Transformer encoder
-        # fusion_output = self.transformer_encoder(
-        #     fusion_input.transpose(0, 1),  # (4, batch_size, 512)
-        #     src_key_padding_mask=attn_mask
-        # )  # (4, batch_size, 512)
-        # cls_output = fusion_output[0]  # (batch_size, 512)
-        assert not torch.isnan(concat_vector).any(), "cls_output contains NaN"
-        # Step 9: Predict fMRI tokens
-        pred = self.pred_head(concat_vector)  # (batch_size, out_features)
-        return pred
+        concat_vector = torch.cat([audio, vision, text], dim=2) #Shape: (batch_size, seq_len, 1536)
+        concat_vector = self.concat_norm(concat_vector)
+        concat_vector = self.vector_transformer(concat_vector)
+
+        hidden_last_layer = concat_vector[:, -1, :].squeeze(1) #Shape: (batch_size, 1536)
+        assert not torch.isnan(hidden_last_layer).any(), "hidden_last_layer contains NaN"
+        pred = self.pred_head(hidden_last_layer) #Shape: (batch_size, 1000)
+        return pred  
     
     def training_step(self, batch, batch_idx):
         """
@@ -242,7 +234,7 @@ class FMRIPredictor(L.LightningModule):
             target=fmri_tokens,
         )
 
-        if batch_idx == 0 and not debug:
+        if batch_idx == 0 and not self.debug:
             self.logger.experiment.log({
                 "val/pearson_r": pearson_r,
                 "val/mae": mae,
@@ -297,20 +289,14 @@ class FMRIPredictor(L.LightningModule):
         }
 
 
-config = {
-    'out_features': 1000,
-    'learning_rate': 1e-4,
-    'warmup_steps': 5000,
-    'weight_decay': 0.01
-}
-model = FMRIPredictor(config)
-audio = torch.randn(4, 5, 128)
-video = torch.randn(4, 5, 8192)
-text = torch.randn(4, 768)
-# text_mask = torch.randint(0, 2, (4,))
-# fmri_tokens = torch.randint(0, 1000, (1, 32))
-out = model(audio, video, text)
-print("fmri tokens shape: ", out.shape)
+
+# audio = torch.randn(4, 5, 128)
+# video = torch.randn(4, 5, 8192)
+# text = torch.randn(4, 768)
+# # text_mask = torch.randint(0, 2, (4,))
+# # fmri_tokens = torch.randint(0, 1000, (1, 32))
+# out = model(audio, video, text)
+# print("fmri tokens shape: ", out.shape)
 
 project = "algonauts_transformer"
 wandb_logger = WandbLogger(
@@ -350,11 +336,22 @@ val_loader = DataLoader(val_ds,
                         prefetch_factor=2, 
                         persistent_workers=True
                     )
-
+debug = False
+config = {
+    'out_features': 1000,
+    'transformer_dropout': 0.1,
+    'vision_dropout': 0.2,
+    'fmri_dropout': 0.3,
+    'learning_rate': 1e-4,
+    'warmup_steps': 5000,
+    'weight_decay': 0.01,
+    'debug': debug
+}
+model = FMRIPredictor(config)
 torch.set_float32_matmul_precision('high')
 summary = ModelSummary(model, max_depth=2)
 
-debug = False
+
 trainer = L.Trainer(
     accelerator='auto',
     devices=1,
@@ -362,6 +359,7 @@ trainer = L.Trainer(
     callbacks=[checkpoint_callback, early_stopping],
     logger=wandb_logger if not debug else None,
     precision='bf16-mixed',
+    # gradient_clip_val=0.75,
     log_every_n_steps=1,
 )
 

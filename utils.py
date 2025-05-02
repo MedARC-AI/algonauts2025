@@ -910,3 +910,110 @@ class AlgonautsDataset(Dataset):
     
     def get_raw_stimuli(self):
         return self.raw_stimuli
+
+
+def normalize(data):
+    assert data.shape[1] == 1000, "Data does not have 1000 parcels"
+    means = np.mean(data, axis=0)
+    stds = np.std(data, axis=0)
+
+    # Avoid division by zero
+    stds = np.where(stds == 0, 1, stds)
+
+    # Standardize
+    normalized_data = (data - means) / stds
+
+    # Verify
+    new_means = np.mean(normalized_data, axis=0)
+    new_stds = np.std(normalized_data, axis=0)
+    max_abs_mean = np.max(np.abs(new_means))
+    max_std_diff = np.max(np.abs(new_stds - 1))
+    # Check for problematic parcels
+    if max_std_diff > 1e-5 or max_abs_mean > 1e-5:
+        print("  Warning: Normalization not perfect. Check data.")
+    else:
+        return normalized_data
+    
+def normalize_across_episodes(fmri_data):
+    # Step 1: Collect all episode data into a single array
+    data_keys = list(fmri_data.keys())
+    all_data = np.concatenate([fmri_data[key] for key in data_keys], axis=0)  # Shape: (total_clips, 1000)
+
+    # Step 2: Compute global mean and std across all clips
+    global_means = np.mean(all_data, axis=0)  # Mean for each parcel
+    global_stds = np.std(all_data, axis=0)   # Std for each parcel
+    global_stds = np.where(global_stds == 0, 1, global_stds)  # Avoid division by zero
+
+    # Step 3: Apply global normalization to each episode
+    for key in data_keys:
+        fmri_data[key] = (fmri_data[key] - global_means) / global_stds
+
+    # Step 4: Verify normalization (optional, for debugging)
+    all_normalized_data = np.concatenate([fmri_data[key] for key in data_keys], axis=0)
+    new_means = np.mean(all_normalized_data, axis=0)
+    new_stds = np.std(all_normalized_data, axis=0)
+    max_abs_mean = np.max(np.abs(new_means))
+    max_std_diff = np.max(np.abs(new_stds - 1))
+    print(f"Global normalization stats:")
+    print(f"Max absolute mean: {max_abs_mean}")
+    print(f"Max std difference: {max_std_diff}")
+    if max_std_diff > 1e-5 or max_abs_mean > 1e-5:
+        print("Warning: Global normalization not perfect. Check data.")
+    return fmri_data
+
+
+def check_fmri_centering(fmri_data: np.ndarray, tolerance: float = 1e-6):
+    """
+    Checks if the fMRI data is centered (mean close to zero) for each parcel.
+
+    Args:
+        fmri_data (np.ndarray): The fMRI data array with shape (n_samples, n_parcels).
+                                Assumes samples are along axis 0 and parcels along axis 1.
+        tolerance (float): The absolute tolerance for checking if the mean is close to zero.
+                           Defaults to 1e-6.
+
+    Returns:
+        bool: True if the data is centered for all parcels within the tolerance, False otherwise.
+    """
+    if fmri_data.ndim != 2:
+        raise ValueError(f"Expected fmri_data to be 2D (n_samples, n_parcels), but got shape {fmri_data.shape}")
+
+    n_samples, n_parcels = fmri_data.shape
+    print(f"Checking centering for fMRI data with shape: {fmri_data.shape}")
+
+    # Calculate the mean for each parcel across all samples
+    parcel_means = np.mean(fmri_data, axis=0) # Shape: (n_parcels,)
+
+    # Check if all parcel means are close to zero
+    # np.allclose checks if two arrays are element-wise equal within a given tolerance.
+    # We compare parcel_means to an array of zeros of the same shape.
+    is_centered = np.allclose(parcel_means, np.zeros(n_parcels), atol=tolerance)
+
+    # --- Reporting ---
+    if is_centered:
+        print(f"\nData IS centered.")
+        print(f"All {n_parcels} parcel means are within +/-{tolerance} of zero.")
+    else:
+        print(f"\nData IS NOT centered.")
+        # Find parcels that are not centered
+        non_centered_indices = np.where(np.abs(parcel_means) > tolerance)[0]
+        num_non_centered = len(non_centered_indices)
+        print(f"{num_non_centered} out of {n_parcels} parcels have means outside the tolerance +/-{tolerance}.")
+
+        # Show range of means for context
+        min_mean = np.min(parcel_means)
+        max_mean = np.max(parcel_means)
+        print(f"Overall range of parcel means: [{min_mean:.4g}, {max_mean:.4g}]")
+
+        # Optionally, list some non-centered means
+        if num_non_centered < 10:
+             print("Means of non-centered parcels:")
+             for idx in non_centered_indices:
+                 print(f"  Parcel {idx}: {parcel_means[idx]:.4g}")
+        else:
+             print(f"Means of first 5 non-centered parcels:")
+             for i in range(5):
+                  idx = non_centered_indices[i]
+                  print(f"  Parcel {idx}: {parcel_means[idx]:.4g}")
+
+    return is_centered
