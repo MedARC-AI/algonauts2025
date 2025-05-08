@@ -3,7 +3,7 @@ import os
 import h5py
 import numpy as np
 from torch.utils.data import Dataset
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, CosineAnnealingWarmRestarts
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +18,7 @@ from tqdm import tqdm
 from pathlib import Path
 import zipfile
 import sys
-from utils import load_fmri, align_features_and_fmri_samples, align_features_and_fmri_samples_friends_s7, CosineLRSchedulerWithWarmup, calculate_metrics, normalize, normalize_across_episodes, check_fmri_centering
+from utils import load_fmri, align_features_and_fmri_samples, align_features_and_fmri_samples_friends_s7, CosineLRSchedulerWithWarmup, calculate_metrics, normalize, normalize_across_episodes, check_fmri_centering, CosineAnnealingWarmDecayedRestarts
 
 
 class AlgonautsDataset(Dataset):
@@ -47,7 +47,6 @@ class AlgonautsDataset(Dataset):
                         for modality in ['audio', 'visual']:
                             with h5py.File(os.path.join(self.features_dir[modality], modality, f"{episode_base}_features_{modality}.h5"), 'r') as f:
                                 try:
-                                    print(episode_base.split('_'))
                                     stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
                                 except:
                                     try:
@@ -74,7 +73,6 @@ class AlgonautsDataset(Dataset):
                 
                 for partition in partitions:
                     partition_base = partition.split('_features_')[0]
-                    print(partition_base)
                     
                     for modality in ['audio', 'visual']:
                         with h5py.File(os.path.join(self.features_dir[modality], modality, f"{partition_base}_features_{modality}.h5"), 'r') as f:
@@ -130,7 +128,6 @@ class AlgonautsDataset(Dataset):
             'video': self.aligned_features['visual'][idx],
             'language': self.aligned_features['language'][idx],
             'fmri': self.aligned_fmri[idx],
-            'subject': self.subject
         }
     
     def get_raw_stimuli(self):
@@ -155,7 +152,7 @@ modality = "all"  #@param ["visual", "audio", "language", "all"]
 
 excluded_samples_start = 5  #@param {type:"slider", min:0, max:20, step:1}
 excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
-hrf_delay = 3  #@param {type:"slider", min:0, max:10, step:1}
+hrf_delay = 0  #default: 3
 stimulus_window = 15
 
 subject = 1 #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
@@ -247,7 +244,6 @@ val_loader = DataLoader(val_ds,
 #     break
 
 
-import sys; sys.exit()
 
 class MultiModalFusion(L.LightningModule):
     def __init__(self, config: dict):
@@ -266,6 +262,7 @@ class MultiModalFusion(L.LightningModule):
         self.audio_proj_dim = config['audio_proj_dim']
         self.num_attn_heads = config['num_attn_heads']
         self.subjects = config['subjects']
+        self.decay_factor = config['decay_factor']
 
         self.vision_proj = nn.Sequential(
             nn.Linear(8192, self.vision_proj_dim),
@@ -316,9 +313,7 @@ class MultiModalFusion(L.LightningModule):
         self.pos_embedding = nn.Parameter(torch.zeros(1, self.stimulus_window, self.latent_dim))
 
         # self.fmri_proj = nn.Linear(self.latent_dim, 1000)
-        self.fmri_proj = nn.ModuleDict({
-            subj: nn.Linear(self.latent_dim, 1000) for subj in self.subjects
-        })
+        self.fmri_proj = nn.Linear(self.latent_dim, 1000)
         
         self.save_hyperparameters()
 
@@ -342,9 +337,9 @@ class MultiModalFusion(L.LightningModule):
 
         logits = self.transformer_encoder(fused_emb) #Shared backbone
         # fmri_recon = self.fmri_proj(logits.mean(dim=1))
-        # fmri_recon = self.fmri_proj(logits[:, -1, :]) 
+        fmri_recon = self.fmri_proj(logits[:, -1, :]) 
+        return fmri_recon
 
-        return logits
     
     # def pearson_loss(self, pred, target, epsilon=1e-6):
     #     pred_mean = torch.mean(pred, dim=1, keepdim=True)
@@ -360,14 +355,8 @@ class MultiModalFusion(L.LightningModule):
     #     return -torch.mean(corr) # Minimize negative correlation -> Maximize correlation
 
     def training_step(self, batch, batch_idx):
-        vision, audio, text, fmri, subj = batch['video'], batch['audio'], batch['language'], batch['fmri'], batch['subject']
-
-        if not all(s == subj[0] for s in subj):
-            raise ValueError("Batch contains mixed subject data")
-
-        logits = self(vision, audio, text)
-        recon_fmri = self.fmri_proj[subj[0]](logits[:, -1, :]) #Extracting last hidden state
-
+        vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+        recon_fmri = self(vision, audio, text)
 
         mae, mse, _, pearson_r, _ = calculate_metrics(
             pred=recon_fmri,
@@ -388,14 +377,8 @@ class MultiModalFusion(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        vision, audio, text, fmri, subj = batch['video'], batch['audio'], batch['language'], batch['fmri'], batch['subject']
-        # print(vision.shape, audio.shape, text.shape, fmri.shape)
-
-        if not all(s == subj[0] for s in subj):
-            raise ValueError("Batch contains mixed subject data")
-
-        logits = self(vision, audio, text)
-        recon_fmri = self.fmri_proj[subj[0]](logits[:, -1, :]) #Extracting last hidden state
+        vision, audio, text, fmri= batch['video'], batch['audio'], batch['language'], batch['fmri']
+        recon_fmri = self(vision, audio, text)
 
         mae, mse, _, pearson_r, _ = calculate_metrics(
             pred=recon_fmri,
@@ -447,10 +430,25 @@ class MultiModalFusion(L.LightningModule):
         #     min_lr=self.learning_rate * 0.01
         # )
 
-        scheduler = CosineAnnealingLR(
+        # scheduler = CosineAnnealingLR(
+        #     optimizer=optimizer,
+        #     T_max=self.trainer.max_epochs,
+        #     eta_min=self.learning_rate * 0.01
+        # )
+
+        # scheduler = CosineAnnealingWarmRestarts(
+        #     optimizer=optimizer,
+        #     T_0=self.trainer.max_epochs // 2,
+        #     T_mult=1,
+        #     eta_min=self.learning_rate * 0.01
+        # )
+
+        scheduler = CosineAnnealingWarmDecayedRestarts(
             optimizer=optimizer,
-            T_max=self.trainer.max_epochs,
-            eta_min=self.learning_rate * 0.01
+            T_0= self.trainer.max_epochs // 2,
+            T_mult = 2,
+            eta_min=self.learning_rate * 0.01,
+            decay=self.decay_factor
         )
         
         return {
@@ -467,20 +465,20 @@ class MultiModalFusion(L.LightningModule):
 project = "algonauts-transformer"
 # run_name = "test"
 # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
-run_name = "CSAcrossAtt_LN_1024emb_15sw_1e5lr_drop1"
+run_name = "hrf0crossAtt_LN_1024emb_15sw_CSDW1-1e5lr_drop1"
 wandb_logger = WandbLogger(
     project=project,
     name=run_name,
     dir="/home/pranav/mihir/algonauts_challenge/algonauts2025/wandb_logs"
 )
-checkpoint_callback = ModelCheckpoint(
-    dirpath=f'/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/{run_name}',
-    filename='{step:04d}-{val_pearson_r:.4f}',
-    monitor='val_pearson_r',
-    mode='max',
-    save_top_k=1,
-    save_last=True,
-)
+# checkpoint_callback = ModelCheckpoint(
+#     dirpath=f'/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/{run_name}',
+#     filename='{step:04d}-{val_pearson_r:.4f}',
+#     monitor='val_pearson_r',
+#     mode='max',
+#     save_top_k=1,
+#     save_last=True,
+# )
 
 early_stopping = EarlyStopping(
     monitor='val_pearson_r',
@@ -503,7 +501,9 @@ config = {
     'stimulus_window': stimulus_window,
     'weight_decay': 0.01,
     'alpha': 1.0,
-    'subjects': subject
+    'subjects': subject,
+    'hrf_delay': hrf_delay,
+    'decay_factor': 0.2,
 }
 
 model = MultiModalFusion(config)
@@ -512,13 +512,13 @@ torch.set_float32_matmul_precision('high')
 summary = ModelSummary(model, max_depth=2)
 print(summary)
 
-debug = True
+debug = False
 trainer = L.Trainer(
     accelerator='auto',
     devices=1,
-    max_epochs=20,
+    max_epochs=40,
     # callbacks=[early_stopping],
-    callbacks=[checkpoint_callback],
+    # callbacks=[checkpoint_callback],
     logger=wandb_logger if not debug else None,
     precision='bf16-mixed',
     log_every_n_steps=1,
@@ -527,5 +527,4 @@ trainer = L.Trainer(
 ckpt_path = None
 trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path if ckpt_path else None)
 wandb.finish()
-
 
