@@ -429,7 +429,7 @@ def compute_encoding_accuracy(fmri_dir, fmri_val, fmri_val_pred, subject, modali
 
 
 def align_features_and_fmri_samples_friends_s7(features_friends_s7,
-    root_data_dir):
+    root_data_dir, hrf_delay=3, stimulus_window=5):
     """
     Align the stimulus feature with the fMRI response samples for Friends season
     7 episodes, later used to predict the fMRI responses for challenge
@@ -464,7 +464,6 @@ def align_features_and_fmri_samples_friends_s7(features_friends_s7,
     # and fMRI samples for a better correspondence between input stimuli and the
     # brain response. For example, with a hrf_delay of 3, if the stimulus chunk
     # of interest is 17, the corresponding fMRI sample will be 20.
-    hrf_delay = 3
 
     ### Stimulus window ###
     # stimulus_window indicates how many stimulus feature samples are used to
@@ -481,7 +480,6 @@ def align_features_and_fmri_samples_friends_s7(features_friends_s7,
     # used to train and validate the fMRI encoding models. Here you will use a
     # value of 5, since this is how the challenge baseline encoding models were
     # trained.
-    stimulus_window = 5
 
     ### Loop over subjects ###
     subjects = [1, 2, 3, 5]

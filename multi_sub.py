@@ -48,7 +48,8 @@ class AlgonautsDataset(Dataset):
                         for modality in ['audio', 'visual']:
                             with h5py.File(os.path.join(self.features_dir[modality], modality, f"{episode_base}_features_{modality}.h5"), 'r') as f:
                                 try:
-                                    stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
+                                    stimuli_features[modality][episode_base.split('_')[1]] = f['language_model.model.layers.20.post_attention_layernorm'][:] #(453, 3584)
+                                    # stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
                                 except:
                                     try:
                                         stimuli_features[modality][episode_base.split('_')[1]] = f['layers.31.fc2'][:]
@@ -78,7 +79,8 @@ class AlgonautsDataset(Dataset):
                     for modality in ['audio', 'visual']:
                         with h5py.File(os.path.join(self.features_dir[modality], modality, f"{partition_base}_features_{modality}.h5"), 'r') as f:
                             try:
-                                stimuli_features[modality][partition_base] = f[partition_base][modality][:]
+                                stimuli_features[modality][partition_base] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+                                # stimuli_features[modality][partition_base] = f[partition_base][modality][:]
                             except:
                                 try:
                                     stimuli_features[modality][partition_base] = f['layers.31.fc2'][:]
@@ -113,7 +115,7 @@ class AlgonautsDataset(Dataset):
         # check_fmri_centering(fmri_data=fmri)
         # fmri_data = normalize_across_episodes(fmri_data)
 
-        self.aligned_features, self.aligned_fmri_sub01 = align_features_and_fmri_samples(
+        x, self.aligned_fmri_sub01 = align_features_and_fmri_samples(
             stimuli_features, 
             fmri_data["sub1"], 
             self.excluded_samples_start, 
@@ -122,36 +124,36 @@ class AlgonautsDataset(Dataset):
             self.stimulus_window, 
             self.movies
         )
-        # del x
-        # x, self.aligned_fmri_sub02 = align_features_and_fmri_samples(
-        #     stimuli_features, 
-        #     fmri_data["sub2"], 
-        #     self.excluded_samples_start, 
-        #     self.excluded_samples_end, 
-        #     self.hrf_delay, 
-        #     self.stimulus_window, 
-        #     self.movies
-        # )
-        # del x
-        # x, self.aligned_fmri_sub03 = align_features_and_fmri_samples(
-        #     stimuli_features, 
-        #     fmri_data["sub3"], 
-        #     self.excluded_samples_start, 
-        #     self.excluded_samples_end, 
-        #     self.hrf_delay, 
-        #     self.stimulus_window, 
-        #     self.movies
-        # )
-        # del x
-        # self.aligned_features, self.aligned_fmri_sub05 = align_features_and_fmri_samples(
-        #     stimuli_features, 
-        #     fmri_data["sub5"], 
-        #     self.excluded_samples_start, 
-        #     self.excluded_samples_end, 
-        #     self.hrf_delay, 
-        #     self.stimulus_window, 
-        #     self.movies
-        # )
+        del x
+        x, self.aligned_fmri_sub02 = align_features_and_fmri_samples(
+            stimuli_features, 
+            fmri_data["sub2"], 
+            self.excluded_samples_start, 
+            self.excluded_samples_end, 
+            self.hrf_delay, 
+            self.stimulus_window, 
+            self.movies
+        )
+        del x
+        x, self.aligned_fmri_sub03 = align_features_and_fmri_samples(
+            stimuli_features, 
+            fmri_data["sub3"], 
+            self.excluded_samples_start, 
+            self.excluded_samples_end, 
+            self.hrf_delay, 
+            self.stimulus_window, 
+            self.movies
+        )
+        del x
+        self.aligned_features, self.aligned_fmri_sub05 = align_features_and_fmri_samples(
+            stimuli_features, 
+            fmri_data["sub5"], 
+            self.excluded_samples_start, 
+            self.excluded_samples_end, 
+            self.hrf_delay, 
+            self.stimulus_window, 
+            self.movies
+        )
 
     def __len__(self):
         return self.aligned_features['audio'].shape[0]
@@ -163,9 +165,9 @@ class AlgonautsDataset(Dataset):
             'language': self.aligned_features['language'][idx],
             'fmri': {
                 'sub01': self.aligned_fmri_sub01[idx],
-                'sub02': self.aligned_fmri_sub01[idx],
-                'sub03': self.aligned_fmri_sub01[idx],
-                'sub05': self.aligned_fmri_sub01[idx]
+                'sub02': self.aligned_fmri_sub02[idx],
+                'sub03': self.aligned_fmri_sub03[idx],
+                'sub05': self.aligned_fmri_sub05[idx]
             },
         }
     
@@ -173,9 +175,10 @@ class AlgonautsDataset(Dataset):
         return self.raw_stimuli
    
 
-vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-# audio_dir = '/home/pranav/mihir/algonauts_challenge/whisper/'
+vision_dir = '/home/pranav/mihir/algonauts_challenge/internvl3_8b_8bit/'
+# vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+# audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+audio_dir = '/home/pranav/mihir/algonauts_challenge/whisper/'
 lang_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
 features_dir = {
     "visual": vision_dir,
@@ -194,8 +197,8 @@ excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
 hrf_delay = 0 #default: 3  #@param {type:"slider", min:0, max:10, step:1}
 stimulus_window = 15
 
-subject = [1]
-# subject = [1, 2, 3, 5] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
+# subject = [1]
+subject = [1, 2, 3, 5] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
 
 
 
@@ -275,18 +278,20 @@ val_loader = DataLoader(val_ds,
 print(f"Train samples: {len(train_ds)}")
 print(f"Val samples: {len(val_ds)}")
 
-# for i, batch in enumerate(train_loader):
-#     vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
-#     print(f"Vision embeds: {vision.shape}")
-#     print(f"Audio embeds: {audio.shape}")
-#     print(f"Language embeds: {lang.shape}")
-#     k = fmri.keys()
-#     print('fmri: ', k)
-#     print(f"fMRI_sub01: {fmri['sub01'].shape}")
-#     print(f"fMRI_sub01: {fmri['sub02'].shape}")
-#     print(f"fMRI_sub01: {fmri['sub03'].shape}")
-#     print(f"fMRI_sub01: {fmri['sub05'].shape}")
-#     break
+for i, batch in enumerate(train_loader):
+    vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+    print(f"Vision embeds: {vision.shape}")
+    print(f"Audio embeds: {audio.shape}")
+    print(f"Language embeds: {lang.shape}")
+    k = fmri.keys()
+    print('fmri: ', k)
+    print(f"fMRI_sub01: {fmri['sub01'].shape}")
+    print(f"fMRI_sub02: {fmri['sub02'].shape}")
+    print(f"fMRI_sub03: {fmri['sub03'].shape}")
+    print(f"fMRI_sub05: {fmri['sub05'].shape}")
+    break
+
+
 
 
 class MultiModalFusion(L.LightningModule):
@@ -306,15 +311,18 @@ class MultiModalFusion(L.LightningModule):
         self.audio_proj_dim = config['audio_proj_dim']
         self.num_attn_heads = config['num_attn_heads']
         self.subjects = config['subjects']
+        self.decay_factor = config['decay_factor']
 
         self.vision_proj = nn.Sequential(
-            nn.Linear(8192, self.vision_proj_dim),
+            nn.Linear(3584, self.vision_proj_dim),
             nn.ReLU(),
+            nn.Dropout(self.dropout_prob),
             nn.Linear(self.vision_proj_dim, self.latent_dim)
         )
         self.audio_proj = nn.Sequential(
-            nn.Linear(128, self.audio_proj_dim),
+            nn.Linear(1280, self.audio_proj_dim),
             nn.ReLU(),
+            nn.Dropout(self.dropout_prob),
             nn.Linear(self.audio_proj_dim, self.latent_dim)
         )
 
@@ -357,7 +365,7 @@ class MultiModalFusion(L.LightningModule):
 
         # self.fmri_proj = nn.Linear(self.latent_dim, 1000)
         self.fmri_proj = nn.ModuleDict({
-            str(subj): nn.Linear(self.latent_dim, 1000) for subj in self.subjects
+            'sub0'+str(i): nn.Linear(self.latent_dim, 1000) for i in self.subjects
         })
         
         self.save_hyperparameters()
@@ -382,8 +390,6 @@ class MultiModalFusion(L.LightningModule):
 
         logits = self.transformer_encoder(fused_emb) #Shared backbone
         # fmri_recon = self.fmri_proj(logits.mean(dim=1))
-        # fmri_recon = self.fmri_proj(logits[:, -1, :]) 
-
         return logits
     
     # def pearson_loss(self, pred, target, epsilon=1e-6):
@@ -404,25 +410,36 @@ class MultiModalFusion(L.LightningModule):
 
 
         logits = self(vision, audio, text)
-        sampled_sub = random.choice(subject)
-        recon_fmri = self.fmri_proj[str(sampled_sub)](logits[:, -1, :]) #Extracting last hidden state
+        multi_mse, multi_mae, multi_pearson_r, multi_cosine = [], [], [], []
+        for i in self.subjects:
+            rec_fmri = self.fmri_proj[f'sub0{i}'](logits[:, -1, :])
+            mae, mse, _, pearson_r, _ = calculate_metrics(
+                pred=rec_fmri,
+                target=fmri[f'sub0{i}'],
+            )
+            cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
+            self.log(f"sub0{i}/train_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_mae", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_pearson_r", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_cosine", mse, on_step=False, on_epoch=True, prog_bar=False)
+            multi_mae.append(mae)
+            multi_mse.append(mse)
+            multi_pearson_r.append(pearson_r)
+            multi_cosine.append(cosine_loss)
 
-
-        mae, mse, _, pearson_r, _ = calculate_metrics(
-            pred=recon_fmri,
-            target=fmri[f'sub0{sampled_sub}'],
-        )
-
-        cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri[f'sub0{sampled_sub}'], dim=1)).mean()
-        loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
+        loss = sum(multi_mse)
+        self.log("multisub_train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         # pearson_loss = self.pearson_loss(recon_fmri, fmri)
         # self.log("train_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("train_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("train_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("train/cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("sub01/train_mse", mse_01, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("sub02/train_mse", mse_02, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("sub03/train_mse", mse_03, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("sub05/train_mse", mse_05, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("train_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
+        # # self.log("train_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log("train/cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return loss
 
@@ -430,30 +447,50 @@ class MultiModalFusion(L.LightningModule):
         vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
         # print(vision.shape, audio.shape, text.shape, fmri.shape)
         logits = self(vision, audio, text)
-        val_pear_avg = 0
-        for i in subject:
-
-            recon_fmri = self.fmri_proj[str(i)](logits[:, -1, :]) #Extracting last hidden state
-
+        multi_mse, multi_mae, multi_pearson_r, multi_cosine = [], [], [], []
+        for i in self.subjects:
+            rec_fmri = self.fmri_proj[f'sub0{i}'](logits[:, -1, :])
             mae, mse, _, pearson_r, _ = calculate_metrics(
-                pred=recon_fmri,
+                pred=rec_fmri,
                 target=fmri[f'sub0{i}'],
             )
-            # pearson_loss = self.pearson_loss(recon_fmri, fmri)
-            # self.log("val_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
-            prefix = f"sub0{i}"
-            cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri[f'sub0{i}'], dim=1)).mean()
-            loss = (self.alpha * mse) + ((1 - self.alpha) * cosine_loss)
-            val_pear_avg += pearson_r
-            self.log(f"{prefix}/val_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-            self.log(f"{prefix}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"{prefix}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-            # self.log("val_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"{prefix}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"{prefix}/val_cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
+            cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
+            self.log(f"sub0{i}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_mae", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_pearson_r", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_cosine", mse, on_step=False, on_epoch=True, prog_bar=False)
+            multi_mae.append(mae)
+            multi_mse.append(mse)
+            multi_pearson_r.append(pearson_r)
+            multi_cosine.append(cosine_loss)
+
+        # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
+        val_loss = sum(multi_mse)
+        self.log("multisub_val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        # val_pear_avg = 0
+        # for i in subject:
+
+        #     recon_fmri = self.fmri_proj[str(i)](logits[:, -1, :]) #Extracting last hidden state
+
+        #     mae, mse, _, pearson_r, _ = calculate_metrics(
+        #         pred=recon_fmri,
+        #         target=fmri[f'sub0{i}'],
+        #     )
+        #     # pearson_loss = self.pearson_loss(recon_fmri, fmri)
+        #     # self.log("val_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
+        #     prefix = f"sub0{i}"
+        #     cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri[f'sub0{i}'], dim=1)).mean()
+        #     loss = (self.alpha * mse) + ((1 - self.alpha) * cosine_loss)
+        #     val_pear_avg += pearson_r
+        #     self.log(f"{prefix}/val_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        #     self.log(f"{prefix}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
+        #     self.log(f"{prefix}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
+        #     # self.log("val_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
+        #     self.log(f"{prefix}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
+        #     self.log(f"{prefix}/val_cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
         
-        val_pear_avg /= len(self.subjects)
-        self.log("val_pearson_ravg", val_pear_avg, on_epoch=True, on_step=False, prog_bar=False)
+        # val_pear_avg /= len(self.subjects)
+        # self.log("val_pearson_ravg", val_pear_avg, on_epoch=True, on_step=False, prog_bar=False)
 
     def on_train_epoch_end(self):
         """
@@ -495,6 +532,21 @@ class MultiModalFusion(L.LightningModule):
             T_max=self.trainer.max_epochs,
             eta_min=self.learning_rate * 0.01
         )
+
+        # scheduler = CosineAnnealingWarmRestarts(
+        #     optimizer=optimizer,
+        #     T_0=self.trainer.max_epochs // 2,
+        #     T_mult=1,
+        #     eta_min=self.learning_rate * 0.01
+        # )
+
+        # scheduler = CosineAnnealingWarmDecayedRestarts(
+        #     optimizer=optimizer,
+        #     T_0= self.trainer.max_epochs // 2,
+        #     T_mult = 2,
+        #     eta_min=self.learning_rate * 0.01,
+        #     decay=self.decay_factor
+        # )
         
         return {
             "optimizer": optimizer,
@@ -507,10 +559,10 @@ class MultiModalFusion(L.LightningModule):
         }
 
 
-project = "algonauts-transformer"
+project = "multialgonauts-transformer"
 # run_name = "test"
 # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
-run_name = "hrf0crossatt_1024emb_15sw_CSA1e5lr_drop1"
+run_name = "baseline"
 wandb_logger = WandbLogger(
     project=project,
     name=run_name,
@@ -533,23 +585,39 @@ early_stopping = EarlyStopping(
     min_delta=1e-4
 )
 
+epochs = 15
 config = {
     'latent_dim': 1024,
     'codebook_size': 1000,
     'vision_proj_dim': 1024,
-    'audio_proj_dim': 256,
-    'learning_rate': 1e-5,
+    'audio_proj_dim': 1024,
+    'learning_rate': 5e-6,
     'dropout_prob': 0.1,
     'encoder_dropout_prob': 0.1,
-    'num_layers': 5,
+    'num_layers': 6,
     'num_attn_heads': 8,
     'stimulus_window': stimulus_window,
     'weight_decay': 0.01,
     'alpha': 1.0,
-    'subjects': subject
+    'subjects': subject,
+    'hrf_delay': hrf_delay,
+    'decay_factor': 0.2,
+    'epochs': epochs
 }
 
+
 model = MultiModalFusion(config)
+
+# vid = torch.randn([32, 15, 3584])
+# aud = torch.randn([32, 15, 1, 1280])
+# text = torch.randn(32, 768)
+
+# logits = model(video=vid, audio=aud, text=text)[:, -1, :]
+# print(logits.shape)
+# import sys; sys.exit()
+
+
+
 
 torch.set_float32_matmul_precision('high')
 summary = ModelSummary(model, max_depth=2)
@@ -559,7 +627,7 @@ debug = False
 trainer = L.Trainer(
     accelerator='auto',
     devices=1,
-    max_epochs=20,
+    max_epochs=epochs,
     # callbacks=[early_stopping],
     callbacks=[checkpoint_callback],
     logger=wandb_logger if not debug else None,

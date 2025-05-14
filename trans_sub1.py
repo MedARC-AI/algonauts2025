@@ -47,7 +47,8 @@ class AlgonautsDataset(Dataset):
                         for modality in ['audio', 'visual']:
                             with h5py.File(os.path.join(self.features_dir[modality], modality, f"{episode_base}_features_{modality}.h5"), 'r') as f:
                                 try:
-                                    stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
+                                    stimuli_features[modality][episode_base.split('_')[1]] = f['language_model.model.layers.20.post_attention_layernorm'][:] #(453, 3584)
+                                    # stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
                                 except:
                                     try:
                                         stimuli_features[modality][episode_base.split('_')[1]] = f['layers.31.fc2'][:]
@@ -77,7 +78,8 @@ class AlgonautsDataset(Dataset):
                     for modality in ['audio', 'visual']:
                         with h5py.File(os.path.join(self.features_dir[modality], modality, f"{partition_base}_features_{modality}.h5"), 'r') as f:
                             try:
-                                stimuli_features[modality][partition_base] = f[partition_base][modality][:]
+                                stimuli_features[modality][partition_base] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+                                # stimuli_features[modality][partition_base] = f[partition_base][modality][:]
                             except:
                                 try:
                                     stimuli_features[modality][partition_base] = f['layers.31.fc2'][:]
@@ -134,9 +136,10 @@ class AlgonautsDataset(Dataset):
         return self.raw_stimuli
    
 
-vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-# audio_dir = '/home/pranav/mihir/algonauts_challenge/whisper/'
+vision_dir = '/home/pranav/mihir/algonauts_challenge/internvl3_8b_8bit/'
+# vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+# audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+audio_dir = '/home/pranav/mihir/algonauts_challenge/whisper/'
 lang_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
 features_dir = {
     "visual": vision_dir,
@@ -232,18 +235,19 @@ val_loader = DataLoader(val_ds,
                     )
 
 
-# print(f"Train samples: {len(train_ds)}")
-# print(f"Val samples: {len(val_ds)}")
+print(f"Train samples: {len(train_ds)}")
+print(f"Val samples: {len(val_ds)}")
 
-# for i, batch in enumerate(train_loader):
-#     vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
-#     print(f"Vision embeds: {vision.shape}")
-#     print(f"Audio embeds: {audio.shape}")
-#     print(f"Language embeds: {lang.shape}")
-#     print(f"fMRI: {fmri.shape}")
-#     break
+for i, batch in enumerate(train_loader):
+    vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+    print(f"Vision embeds: {vision.shape}")
+    print(f"Audio embeds: {audio.shape}")
+    print(f"Language embeds: {lang.shape}")
+    print(f"fMRI: {fmri.shape}")
+    break
 
-
+#InternVL3 bs, sw, 3584
+#Whisper bs, sw, 1, 1280
 
 class MultiModalFusion(L.LightningModule):
     def __init__(self, config: dict):
@@ -265,13 +269,15 @@ class MultiModalFusion(L.LightningModule):
         self.decay_factor = config['decay_factor']
 
         self.vision_proj = nn.Sequential(
-            nn.Linear(8192, self.vision_proj_dim),
+            nn.Linear(3584, self.vision_proj_dim),
             nn.ReLU(),
+            nn.Dropout(self.dropout_prob),
             nn.Linear(self.vision_proj_dim, self.latent_dim)
         )
         self.audio_proj = nn.Sequential(
-            nn.Linear(128, self.audio_proj_dim),
+            nn.Linear(1280, self.audio_proj_dim),
             nn.ReLU(),
+            nn.Dropout(self.dropout_prob),
             nn.Linear(self.audio_proj_dim, self.latent_dim)
         )
 
@@ -378,6 +384,7 @@ class MultiModalFusion(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         vision, audio, text, fmri= batch['video'], batch['audio'], batch['language'], batch['fmri']
+        audio = audio.squeeze()
         recon_fmri = self(vision, audio, text)
 
         mae, mse, _, pearson_r, _ = calculate_metrics(
@@ -430,11 +437,11 @@ class MultiModalFusion(L.LightningModule):
         #     min_lr=self.learning_rate * 0.01
         # )
 
-        # scheduler = CosineAnnealingLR(
-        #     optimizer=optimizer,
-        #     T_max=self.trainer.max_epochs,
-        #     eta_min=self.learning_rate * 0.01
-        # )
+        scheduler = CosineAnnealingLR(
+            optimizer=optimizer,
+            T_max=self.trainer.max_epochs,
+            eta_min=self.learning_rate * 0.01
+        )
 
         # scheduler = CosineAnnealingWarmRestarts(
         #     optimizer=optimizer,
@@ -443,13 +450,13 @@ class MultiModalFusion(L.LightningModule):
         #     eta_min=self.learning_rate * 0.01
         # )
 
-        scheduler = CosineAnnealingWarmDecayedRestarts(
-            optimizer=optimizer,
-            T_0= self.trainer.max_epochs // 2,
-            T_mult = 2,
-            eta_min=self.learning_rate * 0.01,
-            decay=self.decay_factor
-        )
+        # scheduler = CosineAnnealingWarmDecayedRestarts(
+        #     optimizer=optimizer,
+        #     T_0= self.trainer.max_epochs // 2,
+        #     T_mult = 2,
+        #     eta_min=self.learning_rate * 0.01,
+        #     decay=self.decay_factor
+        # )
         
         return {
             "optimizer": optimizer,
@@ -465,20 +472,20 @@ class MultiModalFusion(L.LightningModule):
 project = "algonauts-transformer"
 # run_name = "test"
 # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
-run_name = "hrf0crossAtt_LN_1024emb_15sw_CSDW1-1e5lr_drop1"
+run_name = "hrf0internVL8Whisper_1024emb_15sw_7lCSA1-5e6lr_drop1"
 wandb_logger = WandbLogger(
     project=project,
     name=run_name,
     dir="/home/pranav/mihir/algonauts_challenge/algonauts2025/wandb_logs"
 )
-# checkpoint_callback = ModelCheckpoint(
-#     dirpath=f'/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/{run_name}',
-#     filename='{step:04d}-{val_pearson_r:.4f}',
-#     monitor='val_pearson_r',
-#     mode='max',
-#     save_top_k=1,
-#     save_last=True,
-# )
+checkpoint_callback = ModelCheckpoint(
+    dirpath=f'/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/{run_name}',
+    filename='{step:04d}-{val_pearson_r:.4f}',
+    monitor='val_pearson_r',
+    mode='max',
+    save_top_k=1,
+    save_last=True,
+)
 
 early_stopping = EarlyStopping(
     monitor='val_pearson_r',
@@ -487,16 +494,16 @@ early_stopping = EarlyStopping(
     verbose=True,
     min_delta=1e-4
 )
-
+epochs = 15
 config = {
     'latent_dim': 1024,
     'codebook_size': 1000,
     'vision_proj_dim': 1024,
-    'audio_proj_dim': 256,
-    'learning_rate': 1e-5,
+    'audio_proj_dim': 1024,
+    'learning_rate': 5e-6,
     'dropout_prob': 0.1,
     'encoder_dropout_prob': 0.1,
-    'num_layers': 5,
+    'num_layers': 6,
     'num_attn_heads': 8,
     'stimulus_window': stimulus_window,
     'weight_decay': 0.01,
@@ -504,6 +511,7 @@ config = {
     'subjects': subject,
     'hrf_delay': hrf_delay,
     'decay_factor': 0.2,
+    'epochs': epochs
 }
 
 model = MultiModalFusion(config)
@@ -516,9 +524,9 @@ debug = False
 trainer = L.Trainer(
     accelerator='auto',
     devices=1,
-    max_epochs=40,
+    max_epochs=epochs,
     # callbacks=[early_stopping],
-    # callbacks=[checkpoint_callback],
+    callbacks=[checkpoint_callback],
     logger=wandb_logger if not debug else None,
     precision='bf16-mixed',
     log_every_n_steps=1,
