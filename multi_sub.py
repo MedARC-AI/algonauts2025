@@ -154,9 +154,20 @@ class AlgonautsDataset(Dataset):
             self.stimulus_window, 
             self.movies
         )
+    
+        # print(self.aligned_features['visual'].shape) 
+        # print(self.aligned_features['audio'].shape)
+        # print(self.aligned_fmri_sub01.shape)
+        # print(self.aligned_fmri_sub02.shape)
+        # print(self.aligned_fmri_sub03.shape)
+        # print(self.aligned_fmri_sub05.shape)
+        # import sys; sys.exit()
 
     def __len__(self):
-        return self.aligned_features['audio'].shape[0]
+        return min(self.aligned_fmri_sub01.shape[0], 
+                    self.aligned_fmri_sub02.shape[0], 
+                    self.aligned_fmri_sub03.shape[0], 
+                    self.aligned_fmri_sub05.shape[0])
 
     def __getitem__(self, idx):
         return {
@@ -271,14 +282,15 @@ val_loader = DataLoader(val_ds,
                         num_workers=4, 
                         pin_memory=True, 
                         prefetch_factor=2, 
-                        persistent_workers=True
+                        persistent_workers=True,
+                        drop_last=True
                     )
 
 
-print(f"Train samples: {len(train_ds)}")
+# print(f"Train samples: {len(train_ds)}")
 print(f"Val samples: {len(val_ds)}")
 
-for i, batch in enumerate(train_loader):
+for i, batch in enumerate(val_loader):
     vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
     print(f"Vision embeds: {vision.shape}")
     print(f"Audio embeds: {audio.shape}")
@@ -419,9 +431,9 @@ class MultiModalFusion(L.LightningModule):
             )
             cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
             self.log(f"sub0{i}/train_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_mae", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_pearson_r", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_cosine", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/train_cosine", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
             multi_mae.append(mae)
             multi_mse.append(mse)
             multi_pearson_r.append(pearson_r)
@@ -429,7 +441,9 @@ class MultiModalFusion(L.LightningModule):
 
         # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
         loss = sum(multi_mse)
+        pearson_ravg = sum(multi_pearson_r) / len(multi_pearson_r)
         self.log("multisub_train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_pearson_ravg", pearson_ravg, on_step=False, on_epoch=True, prog_bar=False)
         # pearson_loss = self.pearson_loss(recon_fmri, fmri)
         # self.log("train_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
         # self.log("sub01/train_mse", mse_01, on_step=False, on_epoch=True, prog_bar=False)
@@ -456,9 +470,9 @@ class MultiModalFusion(L.LightningModule):
             )
             cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
             self.log(f"sub0{i}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_mae", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_pearson_r", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_cosine", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(f"sub0{i}/val_cosine", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
             multi_mae.append(mae)
             multi_mse.append(mse)
             multi_pearson_r.append(pearson_r)
@@ -466,6 +480,8 @@ class MultiModalFusion(L.LightningModule):
 
         # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
         val_loss = sum(multi_mse)
+        pearson_ravg = sum(multi_pearson_r) / len(multi_pearson_r)
+        self.log("val_pearson_ravg", pearson_ravg, on_step=False, on_epoch=True, prog_bar=False)
         self.log("multisub_val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
         # val_pear_avg = 0
         # for i in subject:
@@ -594,7 +610,7 @@ config = {
     'learning_rate': 5e-6,
     'dropout_prob': 0.1,
     'encoder_dropout_prob': 0.1,
-    'num_layers': 6,
+    'num_layers': 5,
     'num_attn_heads': 8,
     'stimulus_window': stimulus_window,
     'weight_decay': 0.01,
