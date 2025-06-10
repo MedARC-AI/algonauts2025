@@ -268,24 +268,24 @@ class MMDTemporal(L.LightningModule):
             dropout=self.encoder_dropout_prob, batch_first=True
         )
         self.av_fusion_norm = nn.LayerNorm(self.latent_dim)
-        self.text_condition_attn = nn.MultiheadAttention(
-            embed_dim=self.latent_dim, num_heads=self.num_attn_heads,
-            dropout=self.encoder_dropout_prob, batch_first=True
-        )
+        # self.text_condition_attn = nn.MultiheadAttention(
+        #     embed_dim=self.latent_dim, num_heads=self.num_attn_heads,
+        #     dropout=self.encoder_dropout_prob, batch_first=True
+        # )
         self.text_condition_norm = nn.LayerNorm(self.latent_dim)
 
-        self.av_ffn = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
-            nn.GELU(),
-            nn.Dropout(self.dropout_prob),
-            nn.Linear(self.latent_dim, self.latent_dim)
-        )
-        self.text_ffn = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
-            nn.GELU(),
-            nn.Dropout(self.dropout_prob),
-            nn.Linear(self.latent_dim, self.latent_dim)
-        )
+        # self.av_ffn = nn.Sequential(
+        #     nn.Linear(self.latent_dim, self.latent_dim),
+        #     nn.GELU(),
+        #     nn.Dropout(self.dropout_prob),
+        #     nn.Linear(self.latent_dim, self.latent_dim)
+        # )
+        # self.text_ffn = nn.Sequential(
+        #     nn.Linear(self.latent_dim, self.latent_dim),
+        #     nn.GELU(),
+        #     nn.Dropout(self.dropout_prob),
+        #     nn.Linear(self.latent_dim, self.latent_dim)
+        # )
 
         # temp_enc = nn.TransformerEncoderLayer(
         #     d_model=self.latent_dim, 
@@ -376,13 +376,14 @@ class MMDTemporal(L.LightningModule):
         aud_enh = audio_p + ctx_aud
 
         fused_av_stack = self.av_fusion_norm(vis_enh + aud_enh) # (B, T, L)
-        ffn_av = self.av_ffn(fused_av_stack)
+        # ffn_av = self.av_ffn(fused_av_stack)
         # Condition with language features
         # Query: fused_av_stack (B,T,L), Key/Value: lang_p (B,1,L) -> txt_cxt (B,T,L)
-        txt_cxt, _ = self.text_condition_attn(query=fused_av_stack, key=lang_p, value=lang_p)
-        ffn_txt = self.text_ffn(txt_cxt)
+        # txt_cxt, _ = self.text_condition_attn(query=fused_av_stack, key=lang_p, value=lang_p)
+        # ffn_txt = self.text_ffn(txt_cxt)
         # cond_seq = self.text_condition_norm(ffn_av + ffn_txt) # (B, T, L)
-        cond_seq = self.text_condition_norm(fused_av_stack + txt_cxt) # (B, T, L)
+        cond_seq = self.text_condition_norm(fused_av_stack) # (B, T, L)
+        # cond_seq = self.text_condition_norm(fused_av_stack + txt_cxt) # (B, T, L)
 
         # cond_seq += self.pos_embedding
 
@@ -565,7 +566,7 @@ if __name__ == '__main__':
     # run_name = "test"
     # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
     # run_name = "Int20_Whis25_Ll7_drop2"
-    run_name = "Int20_Whis12_Lla7_baseline"
+    run_name = "Int20_Whis12_noLLama"
     wandb_logger = WandbLogger(
         project=project,
         name=run_name,

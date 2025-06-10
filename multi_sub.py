@@ -19,198 +19,187 @@ from pathlib import Path
 import zipfile
 import random
 import sys
+import math
 from utils import load_fmri, align_features_and_fmri_samples, align_features_and_fmri_samples_friends_s7, CosineLRSchedulerWithWarmup, calculate_metrics, normalize, normalize_across_episodes, check_fmri_centering
 
+class AlgonautsMultiSubjectDataset(Dataset):
+    """
+    A PyTorch Dataset to load and combine fMRI and stimulus data from multiple subjects.
+    This class uses the functions defined in your 'utils.py' file.
 
-class AlgonautsDataset(Dataset):
-    def __init__(self, features_dir, fmri_dir, movies, subject, excluded_samples_start=5, excluded_samples_end=5, hrf_delay=3, stimulus_window=5):
+    Args:
+        features_dir (dict): Dictionary with paths to the feature directories for each modality.
+        fmri_dir (str): Path to the root directory containing fMRI data.
+        movies (list): List of movies to include (e.g., ['friends-s01', 'movie10-bourne']).
+        subjects (list): List of subject identifiers (e.g., [1, 2, 3, 5]).
+        excluded_samples_start (int): Number of initial TRs to exclude.
+        excluded_samples_end (int): Number of final TRs to exclude.
+        hrf_delay (int): Hemodynamic response function delay in TRs.
+        stimulus_window (int): Number of feature chunks to use for modeling each TR.
+    """
+    def __init__(
+            self, 
+            features_dir, 
+            fmri_dir, 
+            movies, 
+            subjects, 
+            excluded_samples_start=5, 
+            excluded_samples_end=5, 
+            hrf_delay=3, 
+            stimulus_window=5,
+            mean=None,
+            std=None
+            ):
         self.features_dir = features_dir
         self.fmri_dir = fmri_dir
         self.movies = movies
-        self.subject = subject
+        self.subjects = subjects
         self.excluded_samples_start = excluded_samples_start
         self.excluded_samples_end = excluded_samples_end
         self.hrf_delay = hrf_delay
         self.stimulus_window = stimulus_window
-        self.partition_indices = defaultdict(list)
+
+        # --- 1. Load Stimulus Features (Once) ---
+        # Stimulus features are the same across all subjects, so we only need to load them once.
+        print("Loading stimulus features...")
+        stimuli_features = self._load_stimuli_features()
+
+        # --- 2. Load and Align Data for Each Subject ---
+        all_aligned_fmri = []
+        base_aligned_features = None # To be set by the first subject
+        self.subject_ids = [] # To track which subject each sample belongs to
+        self.sample_indices = [] # To track original sample index for each subject
+
+        for sub_id in self.subjects:
+            print(f"\n--- Processing Subject {sub_id} ---")
+            
+            # Load this subject's fMRI data using the function from utils.py
+            fmri_data = load_fmri(self.fmri_dir, sub_id)
+            
+            # Align this subject's fMRI data with the common stimulus features
+            aligned_features_sub, aligned_fmri_sub = align_features_and_fmri_samples(
+                stimuli_features,
+                fmri_data,
+                self.excluded_samples_start,
+                self.excluded_samples_end,
+                self.hrf_delay,
+                self.stimulus_window,
+                self.movies
+            )
+
+            # Store the aligned data
+            all_aligned_fmri.append(aligned_fmri_sub)
+            
+            # Keep track of the subject ID and original index for each sample
+            num_samples = aligned_fmri_sub.shape[0]
+            self.subject_ids.extend([sub_id] * num_samples)
+            self.sample_indices.extend(range(num_samples))
+
+            if base_aligned_features is None:
+                base_aligned_features = aligned_features_sub
+
+        # --- 3. Concatenate Data from All Subjects ---
+        print("\nConcatenating data from all subjects...")
         
-        # First load all raw features
-        stimuli_features = {"visual": {}, "audio": {}, "language": {}}
-        # Load audio and video features first
+        self.aligned_fmri = np.concatenate(all_aligned_fmri, axis=0)
+
+        if mean is None and std is None:
+            print("Calculating global mean and std from training data")
+            self.mean = np.mean(self.aligned_fmri, axis=0)
+            self.std = np.std(self.aligned_fmri, axis=0)
+            self.std[self.std == 0] = 1e-6
+        else:
+            self.mean = mean
+            self.std = std
+
+        self.aligned_fmri = (self.aligned_fmri - self.mean) / self.std
+
+        
+        # The aligned features should be the same for all subjects. We use the one
+        # from the first subject as the canonical version.
+        self.aligned_features = base_aligned_features
+        
+        # Convert tracking lists to numpy arrays
+        self.subject_ids = np.array(self.subject_ids)
+        self.sample_indices = np.array(self.sample_indices)
+        
+        print(f"Dataset created successfully!")
+        print(f"Total samples from {len(self.subjects)} subjects: {self.__len__()}")
+        print(f"Shape of final aligned fMRI: {self.aligned_fmri.shape}")
+        for mod, features in self.aligned_features.items():
+             # The number of samples in the base aligned features should match the per-subject sample count
+            print(f"Shape of shared aligned {mod} features: {features.shape}")
+
+
+    def _load_stimuli_features(self):
+        """
+        Helper function to load all stimulus features using the logic from your
+        original AlgonautsDataset class.
+        """
+        stimuli_features = defaultdict(dict)
         for movie in self.movies:
             if 'friends' in movie:
                 season = movie.split('-')[1]
-                dir_list = sorted(os.listdir(self.features_dir['audio'] + 'audio')) #Just to get a list of all directories
+                # Visual and Audio
+                dir_list = sorted(os.listdir(self.features_dir['audio'] / 'audio'))
                 for episode in dir_list:
                     if f"{season}e" in episode and '_features_' in episode:
-                        episode_base = episode.split('_features_')[0] # friends_s01e01 and so on....
-                        
-                        for modality in ['audio', 'visual']:
-                            with h5py.File(os.path.join(self.features_dir[modality], modality, f"{episode_base}_features_{modality}.h5"), 'r') as f:
-                                try:
-                                    stimuli_features[modality][episode_base.split('_')[1]] = f['language_model.model.layers.20.post_attention_layernorm'][:] #(453, 3584)
-                                    # stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
-                                except:
-                                    try:
-                                        stimuli_features[modality][episode_base.split('_')[1]] = f['layers.31.fc2'][:]
-                                    except:
-                                        print("error friends vid/aud")
-                                        f.visit(lambda x: print(x))
-                                        # sys.exit()
-                lang_dir_list = sorted(os.listdir(self.features_dir['language'] + 'language'))
-                for episode in lang_dir_list:
-                    if f"{season}e" in episode and '_features_' in episode:
                         episode_base = episode.split('_features_')[0]
-                        
-                        with h5py.File(os.path.join(self.features_dir['language'], 'language', f"{episode_base}_features_language.h5"), 'r') as f:
-                            try:
-                                st_season_episode = episode_base.split('_')[1]
-                                stimuli_features['language'][st_season_episode] = f[st_season_episode]['language_pooler_output'][:]
-                            except:
-                                print("error friends lang")
-                                f.visit(lambda x: print(x))
-            else:
+                        for modality in ['audio', 'visual']:
+                            file_path = self.features_dir[modality] / modality / f"{episode_base}_features_{modality}.h5"
+                            with h5py.File(file_path, 'r') as f:
+                                # This key access logic is from your original script
+                                try:
+                                    stimuli_features[modality][episode_base.split('_')[1]] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+                                except KeyError:
+                                    stimuli_features[modality][episode_base.split('_')[1]] = f['layers.12.fc2'][:]
+                # Language
+                lang_file = self.features_dir['language'] / 'friends' / 'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5'
+                with h5py.File(lang_file, 'r') as f:
+                    for ep in f.keys():
+                         if ep.startswith(season):
+                            stimuli_features['language'][ep] = f[ep]['model.layers.7'][:]
+            else: # movie10
                 movie_name = movie.replace('movie10-', '')
-                partitions = sorted([f for f in os.listdir(self.features_dir['audio'] + 'audio') if movie_name in f and '_features_' in f])
-                
+                # Visual and Audio
+                partitions = sorted([f for f in os.listdir(self.features_dir['audio'] / 'audio') if movie_name in f and '_features_' in f])
                 for partition in partitions:
                     partition_base = partition.split('_features_')[0]
-                    
                     for modality in ['audio', 'visual']:
-                        with h5py.File(os.path.join(self.features_dir[modality], modality, f"{partition_base}_features_{modality}.h5"), 'r') as f:
+                         file_path = self.features_dir[modality] / modality / f"{partition_base}_features_{modality}.h5"
+                         with h5py.File(file_path, 'r') as f:
                             try:
                                 stimuli_features[modality][partition_base] = f['language_model.model.layers.20.post_attention_layernorm'][:]
-                                # stimuli_features[modality][partition_base] = f[partition_base][modality][:]
-                            except:
-                                try:
-                                    stimuli_features[modality][partition_base] = f['layers.31.fc2'][:]
-                                except:
-                                    print("error movie vid/aud")
-                                    f.visit(lambda x: print(x))
+                            except KeyError:
+                                stimuli_features[modality][partition_base] = f['layers.12.fc2'][:]
+                # Language
+                lang_file = self.features_dir['language'] / 'movie10' / 'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5'
+                with h5py.File(lang_file, 'r') as f:
+                     for base in f.keys():
+                         if base.startswith(movie_name):
+                            stimuli_features['language'][base] = f[base]['model.layers.7'][:]
+                            
+        return stimuli_features
 
-                lang_partitions = sorted([f for f in os.listdir(self.features_dir['language'] + 'language') if movie_name in f and '_features_' in f])
-                
-                for partition in lang_partitions:
-                    partition_base = partition.split('_features_')[0]
-                    
-                    with h5py.File(os.path.join(self.features_dir['language'], 'language', f"{partition_base}_features_language.h5"), 'r') as f:
-                        try:
-                            stimuli_features['language'][partition_base] = f[partition_base]['language_pooler_output'][:]
-                        except:
-                            print("error movie lang")
-                            f.visit(lambda x: print(x))
-                            sys.exit()
-        fmri_data = {}
-        for i in self.subject:
-            fmri_data[f"sub{i}"] = load_fmri(self.fmri_dir, i)
-
-        # import sys; sys.exit()
-        # fmri_data = load_fmri(self.fmri_dir, self.subject)x
-        # fmri = []
-        # for key in fmri_data.keys():
-        #     data = fmri_data[key]
-        #     fmri.append(data)
-        # fmri = np.concatenate(fmri, axis=0)
-        # print('fMRI data shape: ', fmri.shape)
-        # check_fmri_centering(fmri_data=fmri)
-        # fmri_data = normalize_across_episodes(fmri_data)
-
-        x, self.aligned_fmri_sub01 = align_features_and_fmri_samples(
-            stimuli_features, 
-            fmri_data["sub1"], 
-            self.excluded_samples_start, 
-            self.excluded_samples_end, 
-            self.hrf_delay, 
-            self.stimulus_window, 
-            self.movies
-        )
-        del x
-        x, self.aligned_fmri_sub02 = align_features_and_fmri_samples(
-            stimuli_features, 
-            fmri_data["sub2"], 
-            self.excluded_samples_start, 
-            self.excluded_samples_end, 
-            self.hrf_delay, 
-            self.stimulus_window, 
-            self.movies
-        )
-        del x
-        x, self.aligned_fmri_sub03 = align_features_and_fmri_samples(
-            stimuli_features, 
-            fmri_data["sub3"], 
-            self.excluded_samples_start, 
-            self.excluded_samples_end, 
-            self.hrf_delay, 
-            self.stimulus_window, 
-            self.movies
-        )
-        del x
-        self.aligned_features, self.aligned_fmri_sub05 = align_features_and_fmri_samples(
-            stimuli_features, 
-            fmri_data["sub5"], 
-            self.excluded_samples_start, 
-            self.excluded_samples_end, 
-            self.hrf_delay, 
-            self.stimulus_window, 
-            self.movies
-        )
-    
-        # print(self.aligned_features['visual'].shape) 
-        # print(self.aligned_features['audio'].shape)
-        # print(self.aligned_fmri_sub01.shape)
-        # print(self.aligned_fmri_sub02.shape)
-        # print(self.aligned_fmri_sub03.shape)
-        # print(self.aligned_fmri_sub05.shape)
-        # import sys; sys.exit()
 
     def __len__(self):
-        return min(self.aligned_fmri_sub01.shape[0], 
-                    self.aligned_fmri_sub02.shape[0], 
-                    self.aligned_fmri_sub03.shape[0], 
-                    self.aligned_fmri_sub05.shape[0])
+        """Returns the total number of samples across all subjects."""
+        return self.aligned_fmri.shape[0]
 
     def __getitem__(self, idx):
+        """
+        Returns a single sample (stimulus-fMRI pair) from the combined dataset.
+        """
+        # Get the original sample index for the subject
+        original_idx = self.sample_indices[idx]
+        
         return {
-            'audio': self.aligned_features['audio'][idx],
-            'video': self.aligned_features['visual'][idx],
-            'language': self.aligned_features['language'][idx],
-            'fmri': {
-                'sub01': self.aligned_fmri_sub01[idx],
-                'sub02': self.aligned_fmri_sub02[idx],
-                'sub03': self.aligned_fmri_sub03[idx],
-                'sub05': self.aligned_fmri_sub05[idx]
-            },
+            'audio': self.aligned_features['audio'][original_idx],
+            'video': self.aligned_features['visual'][original_idx],
+            'language': self.aligned_features['language'][original_idx],
+            'fmri': self.aligned_fmri[idx], # fMRI is from the concatenated array
+            'subject_id': self.subject_ids[idx]
         }
-    
-    def get_raw_stimuli(self):
-        return self.raw_stimuli
-   
-
-vision_dir = '/home/pranav/mihir/algonauts_challenge/internvl3_8b_8bit/'
-# vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-# audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-audio_dir = '/home/pranav/mihir/algonauts_challenge/whisper/'
-lang_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
-features_dir = {
-    "visual": vision_dir,
-    "audio": audio_dir,
-    "language": lang_dir
-}
-fmri_dir = '/home/pranav/mihir/algonauts_challenge/algonauts_2025.competitors/fmri/'
-# movies_train = ["friends-s01"]
-# movies_train = ["movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
-movies_train = ["friends-s01", "friends-s02", "friends-s03", "friends-s04", "friends-s05", "movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
-movies_val = ["friends-s06"]
-modality = "all"  #@param ["visual", "audio", "language", "all"]
-
-excluded_samples_start = 5  #@param {type:"slider", min:0, max:20, step:1}
-excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
-hrf_delay = 0 #default: 3  #@param {type:"slider", min:0, max:10, step:1}
-stimulus_window = 15
-
-# subject = [1]
-subject = [1, 2, 3, 5] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
-
 
 
 # subjects_train = [1, 2, 3, 5] # Example: Use subjects 1, 2, 3, 5 for training
@@ -266,393 +255,585 @@ subject = [1, 2, 3, 5] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: tr
 # print(len(combined_val_loader))
 
 
-
-train_ds = AlgonautsDataset(features_dir, fmri_dir, movies=movies_train, subject=subject, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window)
-val_ds = AlgonautsDataset(features_dir, fmri_dir, movies=movies_val, subject=subject, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window)
-train_loader = DataLoader(train_ds,
-                          batch_size=32, 
-                          num_workers=4,
-                          pin_memory=True, 
-                          prefetch_factor=2,
-                          persistent_workers=True
-                    )
-
-val_loader = DataLoader(val_ds, 
-                        batch_size=32, 
-                        num_workers=4, 
-                        pin_memory=True, 
-                        prefetch_factor=2, 
-                        persistent_workers=True,
-                        drop_last=True
-                    )
-
-
-# print(f"Train samples: {len(train_ds)}")
-print(f"Val samples: {len(val_ds)}")
-
-for i, batch in enumerate(val_loader):
-    vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
-    print(f"Vision embeds: {vision.shape}")
-    print(f"Audio embeds: {audio.shape}")
-    print(f"Language embeds: {lang.shape}")
-    k = fmri.keys()
-    print('fmri: ', k)
-    print(f"fMRI_sub01: {fmri['sub01'].shape}")
-    print(f"fMRI_sub02: {fmri['sub02'].shape}")
-    print(f"fMRI_sub03: {fmri['sub03'].shape}")
-    print(f"fMRI_sub05: {fmri['sub05'].shape}")
-    break
-
-
-
-
-class MultiModalFusion(L.LightningModule):
+class MMDTemporal(L.LightningModule):
     def __init__(self, config: dict):
         super().__init__()
         self.config = config
         self.latent_dim = config['latent_dim']
-        self.codebook_size = config['codebook_size']
+        # self.codebook_size = config['codebook_size'] # Not used in this version
         self.learning_rate = config['learning_rate']
         self.dropout_prob = config['dropout_prob']
         self.encoder_dropout_prob = config['encoder_dropout_prob']
-        self.num_layers = config['num_layers']
+        self.num_layers = config['num_layers'] # Original transformer layers, now using num_time_mlp_blocks
         self.stimulus_window = config['stimulus_window']
         self.weight_decay = config['weight_decay']
         self.alpha = config['alpha']
         self.vision_proj_dim = config['vision_proj_dim']
         self.audio_proj_dim = config['audio_proj_dim']
+        self.language_proj_dim = config['vision_proj_dim'] 
         self.num_attn_heads = config['num_attn_heads']
-        self.subjects = config['subjects']
+        self.subjects = config['subjects'] # Not directly used in model architecture
         self.decay_factor = config['decay_factor']
+        self.warmup_epochs = config['warmup_epochs']
+        self.minlr_mult = config['minlr_mult']
 
+        # New config parameters for DynaDiff-style temporal processing
+        self.time_specific_hidden_dim = config['latent_dim']
+
+        # --- Input Projection Layers ---
         self.vision_proj = nn.Sequential(
             nn.Linear(3584, self.vision_proj_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(self.dropout_prob),
             nn.Linear(self.vision_proj_dim, self.latent_dim)
         )
         self.audio_proj = nn.Sequential(
             nn.Linear(1280, self.audio_proj_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(self.dropout_prob),
             nn.Linear(self.audio_proj_dim, self.latent_dim)
         )
+        self.language_proj = nn.Sequential(
+            nn.Linear(2048, self.language_proj_dim),
+            nn.GELU(),
+            nn.Dropout(self.dropout_prob),
+            nn.Linear(self.language_proj_dim, self.latent_dim)
+        )
 
-        self.audio_cross_attn = nn.MultiheadAttention(
-            embed_dim=self.latent_dim,
-            num_heads=self.num_attn_heads,
-            dropout=self.encoder_dropout_prob, # Use configured dropout
-            batch_first=True
+        # --- Multimodal Fusion (Cross-Attention) ---
+        self.audio_vis_cross_attn = nn.MultiheadAttention(
+            embed_dim=self.latent_dim, num_heads=self.num_attn_heads,
+            dropout=self.encoder_dropout_prob, batch_first=True
         )
-        self.video_cross_attn = nn.MultiheadAttention(
-            embed_dim=self.latent_dim,
-            num_heads=self.num_attn_heads,
-            dropout=self.encoder_dropout_prob,
-            batch_first=True
+        self.vision_aud_cross_attn = nn.MultiheadAttention( # Note: This seems to be a duplicate or a typo in original if it does the same as above.
+                                                           # Assuming it's intended for vision query, audio key/value
+            embed_dim=self.latent_dim, num_heads=self.num_attn_heads,
+            dropout=self.encoder_dropout_prob, batch_first=True
         )
-        # Layer to combine the two context-aware outputs
-        self.combine_proj = nn.Linear(self.latent_dim * 2, self.latent_dim)
-        self.layer_norm1 = nn.LayerNorm(self.latent_dim)
-        self.layer_norm2 = nn.LayerNorm(self.latent_dim)
-        # self.fusion_layer = nn.Sequential(
-        #     nn.Linear((self.latent_dim + (self.latent_dim // 2)), self.latent_dim),
-        #     nn.ReLU(),
-        #     nn.Dropout(self.dropout_prob),
-        #     nn.Linear(self.latent_dim, self.latent_dim)
+        self.av_fusion_norm = nn.LayerNorm(self.latent_dim)
+        self.text_condition_attn = nn.MultiheadAttention(
+            embed_dim=self.latent_dim, num_heads=self.num_attn_heads,
+            dropout=self.encoder_dropout_prob, batch_first=True
+        )
+        self.text_condition_norm = nn.LayerNorm(self.latent_dim)
+
+        self.av_ffn = nn.Sequential(
+            nn.Linear(self.latent_dim, self.latent_dim),
+            nn.GELU(),
+            nn.Dropout(self.dropout_prob),
+            nn.Linear(self.latent_dim, self.latent_dim)
+        )
+        self.text_ffn = nn.Sequential(
+            nn.Linear(self.latent_dim, self.latent_dim),
+            nn.GELU(),
+            nn.Dropout(self.dropout_prob),
+            nn.Linear(self.latent_dim, self.latent_dim)
+        )
+
+        # temp_enc = nn.TransformerEncoderLayer(
+        #     d_model=self.latent_dim, 
+        #     nhead=self.num_attn_heads,
+        #     dim_feedforward=self.latent_dim,
+        #     dropout=self.encoder_dropout_prob,
+        #     batch_first=True
+        # )
+        # self.temporal_encoder = nn.TransformerEncoder(
+        #     temp_enc,
+        #     num_layers=self.num_layers
         # )
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.latent_dim, 
-            nhead=self.num_attn_heads,
-            dim_feedforward=self.latent_dim,
-            dropout=self.encoder_dropout_prob,
-            batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=self.num_layers
-        )
+        # self.pos_embedding = nn.Parameter(torch.zeros(1, self.stimulus_window, self.latent_dim))
 
-        self.pos_embedding = nn.Parameter(torch.zeros(1, self.stimulus_window, self.latent_dim))
-
-        # self.fmri_proj = nn.Linear(self.latent_dim, 1000)
-        self.fmri_proj = nn.ModuleDict({
-            'sub0'+str(i): nn.Linear(self.latent_dim, 1000) for i in self.subjects
-        })
+        # --- DynaDiff-style Temporal Processing ---
+        # 1. Time-Specific Linear Layers (using Conv1d)
+        # Input: (B, T, H_in=latent_dim)
+        # Conv1d expects (B, C_in=T, L_in=H_in) if kernel_size=H_in
+        # Output of Conv1d: (B, C_out = T * H_out, 1) if L_out = 1
+        # We want output (B, T, H_out=time_specific_hidden_dim)
         
+        # DynaDiff: self.lin0 = nn.Conv1d(in_channels=T, out_channels=T*hidden, kernel_size=in_dim, groups=T)
+        # Input to this conv1d is (B, T, in_dim), kernel_size is in_dim.
+        # This means L_in = in_dim.
+        # self.time_specific_conv = nn.Conv1d(
+        #     in_channels=self.stimulus_window,             # T (number of time steps)
+        #     out_channels=self.stimulus_window * self.time_specific_hidden_dim, # T * H_out
+        #     kernel_size=self.latent_dim,                 # H_in (feature dim per time step)
+        #     groups=self.stimulus_window,                 # T groups for T independent layers
+        #     bias=True
+        # )
+        self.time_specific_weights = nn.Parameter(
+            torch.Tensor(self.stimulus_window, self.latent_dim, self.time_specific_hidden_dim)
+        )
+        self.time_specific_biases = nn.Parameter(
+            torch.Tensor(self.stimulus_window, self.time_specific_hidden_dim)
+        )
+        nn.init.kaiming_uniform_(self.time_specific_weights, a=math.sqrt(5))
+        if self.latent_dim > 0: # Avoid error if latent_dim is 0, though unlikely
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.time_specific_weights[0])
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            nn.init.uniform_(self.time_specific_biases, -bound, bound)
+        else:
+            nn.init.zeros_(self.time_specific_biases)
+        # 2. Post-Convolution Normalization, Activation, Dropout
+        # Similar to DynaDiff's post_lin0
+        # Input will be (B, T, time_specific_hidden_dim)
+        self.post_tsp = nn.Sequential(
+            nn.LayerNorm(self.time_specific_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(0.5)
+        )
+
+        self.temporal_agg = nn.Linear(self.stimulus_window, 1)
+        self.subject_map = {sub_id: i for i, sub_id in enumerate(self.subjects)}
+        self.subject_embedding = nn.Embedding(len(self.subjects), 32)
+
+        # --- Final Projection to fMRI space ---
+        # Input dim will be self.time_specific_hidden_dim
+        # self.fmri_proj = nn.Linear(self.time_specific_hidden_dim, 1000) 
+        self.fmri_proj = nn.Sequential(
+            nn.Linear(self.time_specific_hidden_dim + 32, self.latent_dim),
+            nn.GELU(),
+            nn.Dropout(self.dropout_prob),
+            nn.Linear(self.latent_dim, 1000)
+        )
+        # 
+        # self.fmri_proj = nn.ModuleDict({
+        #     f"sub0{i}": nn.Sequential(nn.Linear(self.latent_dim, 1000)) for i in self.subjects
+        # }) 
+
         self.save_hyperparameters()
 
-    def forward(self, video, audio, text):
-        vision_features = self.vision_proj(video)
-        audio_features = self.audio_proj(audio.squeeze())
+    def forward(self, video, audio, text, subID):
+        batch_size = video.shape[0]
 
-        audio_context, _ = self.audio_cross_attn(query=audio_features, key=vision_features, value=vision_features)
-        video_context, _ = self.video_cross_attn(query=vision_features, key=audio_features, value=audio_features)
-        audio_enhanced = audio_features + audio_context 
-        video_enhanced = vision_features + video_context
+        # --- Input Projections ---
+        # vision: (B, T, 3584) -> vision_p: (B, T, latent_dim)
+        vision_p = self.vision_proj(video)
+        # audio: (B, T, 1, 1280) -> audio.squeeze(): (B, T, 1280) -> audio_p: (B, T, latent_dim)
+        audio_p = self.audio_proj(audio.squeeze(2)) # Squeeze the channel dim for audio
+        # text: (B, 2048) -> lang_p_proj: (B, latent_dim) -> lang_p: (B, 1, latent_dim)
+        lang_p = self.language_proj(text).unsqueeze(1)
 
-        audio_enhanced = self.layer_norm1(audio_enhanced)
-        video_enhanced = self.layer_norm2(video_enhanced)
-        combined_features = torch.cat((audio_enhanced, video_enhanced), dim=-1)
+        # --- Multimodal Fusion ---
+        # Query: vision_p (B,T,L), Key/Value: audio_p (B,T,L) -> ctx_vis (B,T,L)
+        ctx_vis, _ = self.vision_aud_cross_attn(query=vision_p, key=audio_p, value=vision_p)
+        vis_enh = vision_p + ctx_vis 
+        # Query: audio_p (B,T,L), Key/Value: vision_p (B,T,L) -> ctx_aud (B,T,L)
+        ctx_aud, _ = self.audio_vis_cross_attn(query=audio_p, key=vision_p, value=audio_p) # Corrected: was vision_aud_cross_attn
+        aud_enh = audio_p + ctx_aud
 
-        # fused_features = torch.cat((vision_features, audio_features), dim=-1)
-        fused_emb = self.combine_proj(combined_features)
-        # vision_features += self.pos_embedding
-        fused_emb += self.pos_embedding
+        fused_av_stack = self.av_fusion_norm(vis_enh + aud_enh) # (B, T, L)
+        ffn_av = self.av_ffn(fused_av_stack)
+        # Condition with language features
+        # Query: fused_av_stack (B,T,L), Key/Value: lang_p (B,1,L) -> txt_cxt (B,T,L)
+        txt_cxt, _ = self.text_condition_attn(query=fused_av_stack, key=lang_p, value=lang_p)
+        ffn_txt = self.text_ffn(txt_cxt)
+        # cond_seq = self.text_condition_norm(ffn_av + ffn_txt) # (B, T, L)
+        cond_seq = self.text_condition_norm(fused_av_stack + txt_cxt) # (B, T, L)
 
-        logits = self.transformer_encoder(fused_emb) #Shared backbone
-        # fmri_recon = self.fmri_proj(logits.mean(dim=1))
-        return logits
+        # cond_seq += self.pos_embedding
+
+        # cond_seq = self.temporal_encoder(cond_seq)
+
+
+        # --- DynaDiff-style Temporal Processing ---
+        # Input cond_seq: (B, T, H_in=latent_dim)
+        
+        # 1. Time-Specific Linear Layers
+        # Conv1d expects (B, C_in=T, L_in=H_in)
+        # Output of Conv1d: (B, C_out = T * H_out, 1)
+        # Reshape to (B, T, H_out=time_specific_hidden_dim)
+        # Note: DynaDiff applies lin0 directly to (B,T,H_in)
+        # x = self.lin0(x).reshape(B, T, -1)
+        # This implies Conv1d's kernel_size applies to the last dimension of (B, T, H_in)
+        # if kernel_size = H_in.
+        
+        # Current cond_seq is (B, T, latent_dim). This matches (N, C_in, L_in) if T=C_in, latent_dim=L_in
+        # So, this is the input to time_specific_conv
+        # time_processed_seq = self.time_specific_conv(cond_seq) # (B, T*H_out, 1)
+        # time_processed_seq = time_processed_seq.view(batch_size, self.stimulus_window, self.time_specific_hidden_dim) # (B, T, H_out)
+
+        time_processed_seq = torch.einsum('bti,tio->bto', cond_seq, self.time_specific_weights)
+        time_processed_seq += self.time_specific_biases
+
+        # 2. Post-Convolution Norm, Activation, Dropout
+        # Input (B, T, H_out), Output (B, T, H_out)
+        time_processed_seq = self.post_tsp(time_processed_seq)
+        
+        # 3. Residual MLP Blocks
+        # Input (B, T, H_out), Output (B, T, H_out)
+
+        # 4. Temporal Aggregation
+        # Input (B, T, H_out) -> Permute to (B, H_out, T) for aggregation layer
+        aggregated_features = time_processed_seq.permute(0, 2, 1) # (B, H_out, T)
+        
+        aggregated_features = self.temporal_agg(aggregated_features).squeeze(-1) # (B, H_out)
+
+        sub_ind = torch.tensor([self.subject_map[s.item()] for s in subID]).to(aggregated_features.device)
+        subj_emb = self.subject_embedding(sub_ind)
+
+        combined_feat = torch.cat([aggregated_features, subj_emb], dim=1)
+        
+        # aggregated_features is now (B, H_out = time_specific_hidden_dim)
+
+        # 5. Final Projection to fMRI
+        fmri_recon = self.fmri_proj(combined_feat) # (B, 1000)
+        
+     
+        return fmri_recon
     
-    # def pearson_loss(self, pred, target, epsilon=1e-6):
-    #     pred_mean = torch.mean(pred, dim=1, keepdim=True)
-    #     target_mean = torch.mean(target, dim=1, keepdim=True)
-    #     pred_centered = pred - pred_mean
-    #     target_centered = target - target_mean
-
-    #     cov = torch.sum(pred_centered * target_centered, dim=1)
-    #     pred_std = torch.sqrt(torch.sum(pred_centered**2, dim=1) + epsilon)
-    #     target_std = torch.sqrt(torch.sum(target_centered**2, dim=1) + epsilon)
-
-    #     corr = cov / (pred_std * target_std)
-    #     return -torch.mean(corr) # Minimize negative correlation -> Maximize correlation
-
     def training_step(self, batch, batch_idx):
-        vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+        # 1. Unpack the batch of data
+        vision, audio, text, fmri, subID = batch['video'], batch['audio'], batch['language'], batch['fmri'], batch['subject_id']
 
+        recon_fmri = self(vision, audio, text, subID)
 
-        logits = self(vision, audio, text)
-        multi_mse, multi_mae, multi_pearson_r, multi_cosine = [], [], [], []
-        for i in self.subjects:
-            rec_fmri = self.fmri_proj[f'sub0{i}'](logits[:, -1, :])
-            mae, mse, _, pearson_r, _ = calculate_metrics(
-                pred=rec_fmri,
-                target=fmri[f'sub0{i}'],
-            )
-            cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
-            self.log(f"sub0{i}/train_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/train_cosine", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
-            multi_mae.append(mae)
-            multi_mse.append(mse)
-            multi_pearson_r.append(pearson_r)
-            multi_cosine.append(cosine_loss)
+        # 2. Get the aggregated stimulus features from the shared model
+        mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri, dim=1)).mean()
+        loss = self.alpha * mse + ((1 - self.alpha) * cosine_loss)
 
-        # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
-        loss = sum(multi_mse)
-        pearson_ravg = sum(multi_pearson_r) / len(multi_pearson_r)
-        self.log("multisub_train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train_pearson_ravg", pearson_ravg, on_step=False, on_epoch=True, prog_bar=False)
-        # pearson_loss = self.pearson_loss(recon_fmri, fmri)
-        # self.log("train_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
-        # self.log("sub01/train_mse", mse_01, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("sub02/train_mse", mse_02, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("sub03/train_mse", mse_03, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("sub05/train_mse", mse_05, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("train_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-        # # self.log("train_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log("train/cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("train_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_mae", mae, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train/cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
-        # print(vision.shape, audio.shape, text.shape, fmri.shape)
-        logits = self(vision, audio, text)
-        multi_mse, multi_mae, multi_pearson_r, multi_cosine = [], [], [], []
-        for i in self.subjects:
-            rec_fmri = self.fmri_proj[f'sub0{i}'](logits[:, -1, :])
-            mae, mse, _, pearson_r, _ = calculate_metrics(
-                pred=rec_fmri,
-                target=fmri[f'sub0{i}'],
-            )
-            cosine_loss = (1 - F.cosine_similarity(rec_fmri, fmri[f'sub0{i}'], dim=1)).mean()
-            self.log(f"sub0{i}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-            self.log(f"sub0{i}/val_cosine", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
-            multi_mae.append(mae)
-            multi_mse.append(mse)
-            multi_pearson_r.append(pearson_r)
-            multi_cosine.append(cosine_loss)
-
-        # loss = self.alpha * mse + ((1-self.alpha) * cosine_loss)
-        val_loss = sum(multi_mse)
-        pearson_ravg = sum(multi_pearson_r) / len(multi_pearson_r)
-        self.log("val_pearson_ravg", pearson_ravg, on_step=False, on_epoch=True, prog_bar=False)
-        self.log("multisub_val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
-        # val_pear_avg = 0
-        # for i in subject:
-
-        #     recon_fmri = self.fmri_proj[str(i)](logits[:, -1, :]) #Extracting last hidden state
-
-        #     mae, mse, _, pearson_r, _ = calculate_metrics(
-        #         pred=recon_fmri,
-        #         target=fmri[f'sub0{i}'],
-        #     )
-        #     # pearson_loss = self.pearson_loss(recon_fmri, fmri)
-        #     # self.log("val_pearson_loss", pearson_loss, on_step=False, on_epoch=True, prog_bar=True)
-        #     prefix = f"sub0{i}"
-        #     cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri[f'sub0{i}'], dim=1)).mean()
-        #     loss = (self.alpha * mse) + ((1 - self.alpha) * cosine_loss)
-        #     val_pear_avg += pearson_r
-        #     self.log(f"{prefix}/val_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        #     self.log(f"{prefix}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False)
-        #     self.log(f"{prefix}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False)
-        #     # self.log("val_r2", r2, on_step=False, on_epoch=True, prog_bar=False)
-        #     self.log(f"{prefix}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False)
-        #     self.log(f"{prefix}/val_cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False)
+        # This step mirrors the training step but now calculates and logs metrics per subject.
         
-        # val_pear_avg /= len(self.subjects)
-        # self.log("val_pearson_ravg", val_pear_avg, on_epoch=True, on_step=False, prog_bar=False)
+        # 1. Unpack the batch of data
+        vision, audio, text, fmri, subID = batch['video'], batch['audio'], batch['language'], batch['fmri'], batch['subject_id']
+
+        # 2. Get the aggregated stimulus features from the shared model
+        recon_fmri = self(vision, audio, text, subID)
+        mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri, dim=1)).mean()
+        loss = (self.alpha * mse) + ((1 - self.alpha) * cosine_loss)
+
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True) # Corrected on_step for val
+        self.log("val_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("val_mae", mae, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("val/cosine_loss", cosine_loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        # # print("agg feat: ", agg_feat.dtype)
+
+        # # 3. Efficiently apply subject-specific projection layers for the whole batch
+        # recon_fmri = torch.zeros_like(fmri, dtype=recon_fmri.dtype)
+        # # print("fmri placeholder: ", recon_fmri.dtype)
+        # for sub in torch.unique(subID):
+        #     mask = (subID == sub)
+        #     # print("mask: ", mask.dtype)
+        #     # print("sub: ", sub.dtype)
+        #     proj_layer = self.fmri_proj[f"sub0{str(sub.item())}"]
+        #     subject_specific_output = proj_layer(agg_feat[mask])
+        #     # print("out: ", subject_specific_output.dtype)
+        #     recon_fmri[mask] = subject_specific_output
+
+        # # 4. Calculate overall loss for the batch (for logging and returning)
+        # mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        # cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri, dim=1)).mean()
+        # loss = self.alpha * mse + (1 - self.alpha) * cosine_loss
+
+        # # Log overall validation metrics
+        # # self.log("val/avg_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        # # self.log("val/avg_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        # # self.log("val/avg_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
+        # # --- Calculate and Log Metrics Per Subject ---
+        # subject_pearsons = []
+        # unique_subjects = torch.unique(subID)
+
+        # for sub in unique_subjects:
+        #     mask = (subID == sub)
+            
+        #     if mask.sum() == 0:
+        #         continue
+
+        #     recon_fmri_sub = recon_fmri[mask]
+        #     fmri_sub = fmri[mask]
+
+        #     mae_sub, mse_sub, _, pearson_r_sub, _ = calculate_metrics(pred=recon_fmri_sub, target=fmri_sub)
+        #     cos_sub = (1 - F.cosine_similarity(recon_fmri_sub, fmri_sub, dim=1)).mean() 
+        #     # Log metrics with the requested subject-first naming convention
+        #     self.log(f"sub{sub.item()}/val_mse", mse_sub, on_step=False, on_epoch=True, sync_dist=True)
+        #     self.log(f"sub{sub.item()}/val_mae", mae_sub, on_step=False, on_epoch=True, sync_dist=True)
+        #     self.log(f"sub{sub.item()}/val_pearson_r", pearson_r_sub, on_step=False, on_epoch=True, sync_dist=True)
+        #     self.log(f"sub{sub.item()}/val_cosine_loss", cos_sub, on_step=False, on_epoch=True, sync_dist=True)
+
+        #     subject_pearsons.append(pearson_r_sub)
+
+        # # --- Calculate and Log Average Pearson R Across Subjects ---
+        # if subject_pearsons:
+        #     avg_pearson_r = sum(subject_pearsons) / len(unique_subjects)
+        #     self.log("val_avgpearson_r", avg_pearson_r, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+
+
+    # def training_step(self, batch, batch_idx):
+    #     vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+    #     agg_feat = self(vision, audio, text) # Assuming this is used by self.fmri_proj
+        
+    #     subjects = ['02', '03', '05']
+    #     total_loss = 0.0
+        
+    #     # Loop through each subject to calculate and log metrics
+    #     for sub_id in subjects:
+    #         # Get the target fMRI data for the current subject
+    #         fmri_target = fmri[f'sub{sub_id}']
+            
+    #         # Perform the subject-specific projection/reconstruction
+    #         rec = self.fmri_proj[f'sub{sub_id}'](agg_feat)
+
+    #         # Calculate metrics and cosine loss
+    #         mae, mse, _, pearson_r, _ = calculate_metrics(pred=rec, target=fmri_target)
+    #         cos_l = (1 - F.cosine_similarity(rec, fmri_target, dim=1)).mean()
+
+    #         # Calculate and accumulate the total loss
+    #         subject_loss = self.alpha * mse + ((1 - self.alpha) * cos_l)
+    #         total_loss += subject_loss
+
+    #         # Log subject-specific metrics
+    #         self.log(f"sub{sub_id}/train_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/train_mae", mae, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/train_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/train_cosine_loss", cos_l, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
+    #     # Log the overall training loss
+    #     self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+
+    #     return total_loss
+
+    # def validation_step(self, batch, batch_idx):
+    #     vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
+        
+    #     # This assumes the model's forward pass returns a dictionary of predictions
+    #     # keyed by subject ID, just like the input `fmri` data.
+    #     agg_feat = self(vision, audio, text)
+
+    #     subjects = ['02', '03', '05']
+    #     avg_pearson = 0.0
+    #     total_loss = 0.0
+
+    #     for sub_id in subjects:
+    #         # Get the prediction and target for the current subject
+    #         pred = self.fmri_proj[f'sub{sub_id}'](agg_feat)
+    #         target = fmri[f'sub{sub_id}']
+
+    #         # Calculate metrics and cosine loss
+    #         mae, mse, _, pearson_r, _ = calculate_metrics(pred=pred, target=target)
+    #         cos_l = (1 - F.cosine_similarity(pred, target, dim=1)).mean()
+
+    #         # Calculate and accumulate the total loss
+    #         subject_loss = self.alpha * mse + ((1 - self.alpha) * cos_l)
+    #         total_loss += subject_loss
+    #         avg_pearson += pearson_r
+
+    #         # Log subject-specific validation metrics
+    #         self.log(f"sub{sub_id}/val_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/val_mae", mae, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/val_pearson_r", pearson_r, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+    #         self.log(f"sub{sub_id}/val_cosine_loss", cos_l, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        
+    #     # Log the overall validation loss
+    #     self.log("val_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+    #     avg_pearson /= 3
+    #     self.log("val_avgPearsonR", avg_pearson, on_step=False, on_epoch=True, prog_bar=False)
+        
+
 
     def on_train_epoch_end(self):
-        """
-        Log the current learning rate at the end of each training epoch.
-        """
-        # Get the optimizer
         optimizer = self.optimizers()
         if optimizer:
-            # Access the learning rate from the optimizer's parameter groups
-            # Assuming a single optimizer and parameter group
             current_lr = optimizer.param_groups[0]['lr']
             self.log('learning_rate', current_lr, on_step=False, on_epoch=True, prog_bar=False)
-
     
     def configure_optimizers(self):
-        """
-        Configure the optimizer.
-        """
         optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            betas=(0.9, 0.95),
-            eps=1e-8,
+            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay,
+            betas=(0.9, 0.95), eps=1e-8,
         )
         
-        # Reduce learning rate when validation loss plateaus
-        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        # warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
         #     optimizer,
-        #     mode='max',
-        #     factor=0.1,
-        #     patience=5,
-        #     verbose=True,
-        #     min_lr=self.learning_rate * 0.01
+        #     start_factor=0.1,
+        #     end_factor=1.0,
+        #     total_iters=self.warmup_epochs
         # )
 
         scheduler = CosineAnnealingLR(
             optimizer=optimizer,
             T_max=self.trainer.max_epochs,
-            eta_min=self.learning_rate * 0.01
+            # T_max=self.trainer.max_epochs - self.warmup_epochs,
+            eta_min=self.learning_rate * self.minlr_mult
         )
 
-        # scheduler = CosineAnnealingWarmRestarts(
-        #     optimizer=optimizer,
-        #     T_0=self.trainer.max_epochs // 2,
-        #     T_mult=1,
-        #     eta_min=self.learning_rate * 0.01
-        # )
-
-        # scheduler = CosineAnnealingWarmDecayedRestarts(
-        #     optimizer=optimizer,
-        #     T_0= self.trainer.max_epochs // 2,
-        #     T_mult = 2,
-        #     eta_min=self.learning_rate * 0.01,
-        #     decay=self.decay_factor
+        # combined_scheduler = torch.optim.lr_scheduler.SequentialLR(
+        #     optimizer,
+        #     schedulers=[warmup_scheduler, scheduler],
+        #     milestones=[self.warmup_epochs]
         # )
         
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": scheduler,
-                # "monitor": "val_pearson_r",
-                "interval": "epoch",
-                "frequency": 1
+                "scheduler": scheduler, "interval": "epoch", "frequency": 1
             },
         }
+    
+
+if __name__ == '__main__':
+    L.seed_everything(42, workers=True)
+
+    root_dir = Path('/home/mihirneal/Developer/')
+    vision_dir = root_dir / 'algonauts/internvl3_8b_8bit/'
+    # vision_dir = root_dir / 'algonauts/qwen_omni3-5'
+    # vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+    # audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+    audio_dir = root_dir / 'algonauts/whisper/'
+    # lang_dir = root_dir / 'algonauts/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
+    # lang_dir = root_dir / 'algonauts/meta-llama__Llama-3.2-1B'
+    lang_dir = root_dir / 'algonauts/clane9_feat/algonauts2025/features'
+    features_dir = {
+        "visual": vision_dir,
+        "audio": audio_dir,
+        "language": lang_dir
+    }
+    fmri_dir = root_dir / 'algonauts/algonauts_2025.competitors/fmri/'
+    # movies_train = ["friends-s01"]
+    # movies_train = ["movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
+    movies_train = ["friends-s01", "friends-s02", "friends-s03", "friends-s04", "friends-s05", "movie10-bourne", "movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
+    movies_val = ["friends-s06"]
+    modality = "all"  #@param ["visual", "audio", "language", "all"]
+
+    excluded_samples_start = 5  #@param {type:"slider", min:0, max:20, step:1}
+    excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
+    hrf_delay = 0  #default: 3
+    stimulus_window = 12
+
+    # subject = [1]
+    # subjects = [1] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
+    subjects = [1, 2, 3, 5] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
+    train_ds = AlgonautsMultiSubjectDataset(features_dir, fmri_dir, movies=movies_train, subjects=subjects, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window)
+    val_ds = AlgonautsMultiSubjectDataset(features_dir, fmri_dir, movies=movies_val, subjects=subjects, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window, mean=train_ds.mean, std=train_ds.std)
+    train_loader = DataLoader(train_ds,
+                            batch_size=32, 
+                            num_workers=4,
+                            pin_memory=True, 
+                            prefetch_factor=2,
+                            persistent_workers=True,
+                            shuffle=True
+                        )
+
+    val_loader = DataLoader(val_ds, 
+                            batch_size=32, 
+                            num_workers=4, 
+                            pin_memory=True, 
+                            prefetch_factor=2, 
+                            persistent_workers=True,
+                            drop_last=True
+                        )
 
 
-project = "multialgonauts-transformer"
-# run_name = "test"
-# run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
-run_name = "baseline"
-wandb_logger = WandbLogger(
-    project=project,
-    name=run_name,
-    dir="/home/pranav/mihir/algonauts_challenge/algonauts2025/wandb_logs"
-)
-checkpoint_callback = ModelCheckpoint(
-    dirpath=f'/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/{run_name}',
-    filename='{step:04d}-{val_pearson_r:.4f}',
-    monitor='val_pearson_ravg',
-    mode='max',
-    save_top_k=1,
-    save_last=True,
-)
+    # print(f"Train samples: {len(train_ds)}")
+    print(f"Val samples: {len(val_ds)}")
 
-early_stopping = EarlyStopping(
-    monitor='val_pearson_r',
-    patience=10,
-    mode='max',
-    verbose=True,
-    min_delta=1e-4
-)
+    for i, batch in enumerate(train_loader):
+        vision, audio, lang, fmri, sub = batch['video'], batch['audio'], batch['language'], batch['fmri'], batch['subject_id']
+        print(f"Vision embeds: {vision.shape}")
+        print(f"Audio embeds: {audio.shape}")
+        print(f"Language embeds: {lang.shape}")
+        print('fmri: ', fmri.shape)
+        print(sub)
+        
+        break
 
-epochs = 15
-config = {
-    'latent_dim': 1024,
-    'codebook_size': 1000,
-    'vision_proj_dim': 1024,
-    'audio_proj_dim': 1024,
-    'learning_rate': 5e-6,
-    'dropout_prob': 0.1,
-    'encoder_dropout_prob': 0.1,
-    'num_layers': 5,
-    'num_attn_heads': 8,
-    'stimulus_window': stimulus_window,
-    'weight_decay': 0.01,
-    'alpha': 1.0,
-    'subjects': subject,
-    'hrf_delay': hrf_delay,
-    'decay_factor': 0.2,
-    'epochs': epochs
-}
+    # import sys; sys.exit()
+
+    project = "alg_multisub"
+    # run_name = "test"
+    # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
+    run_name = "sub1_2_3_5_Norm08COSPOS_MLP"
+    wandb_logger = WandbLogger(
+        project=project,
+        name=run_name,
+        dir=root_dir / "algonauts" /"algonauts2025/wandb_logs"
+    )
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=root_dir / 'algonauts' / f'algonauts2025/checkpoints/{project}/{run_name}',
+        filename='{step:04d}-{val_pearson_r:.4f}',
+        monitor='val_pearson_r',
+        mode='max',
+        save_top_k=1,
+        save_last=True,
+    )
+
+    early_stopping = EarlyStopping(
+        monitor='val_pearson_r',
+        patience=10,
+        mode='max',
+        verbose=True,
+        min_delta=1e-4
+    )
+
+    epochs = 15
+    config = {
+        'latent_dim': 1024,
+        'codebook_size': 1000,
+        'vision_proj_dim': 1024,
+        'audio_proj_dim': 1024,
+        'learning_rate': 1e-5,
+        'minlr_mult': 0.001, 
+        'dropout_prob': 0.4, #def 0.1
+        'encoder_dropout_prob': 0.1,
+        'num_layers': 4, #def: 6
+        'num_attn_heads': 8,
+        'stimulus_window': stimulus_window,
+        'weight_decay': 0.01,
+        'alpha': 0.8,
+        'subjects': subjects,
+        'hrf_delay': hrf_delay,
+        'decay_factor': 0.2,
+        'epochs': epochs,
+        'warmup_epochs': None,
+    }
 
 
-model = MultiModalFusion(config)
+    model = MMDTemporal(config)
 
-# vid = torch.randn([32, 15, 3584])
-# aud = torch.randn([32, 15, 1, 1280])
-# text = torch.randn(32, 768)
+    # vid = torch.randn([32, 15, 3584])
+    # aud = torch.randn([32, 15, 1, 1280])
+    # text = torch.randn(32, 2048)
+    # subID = torch.randn(32, 1)
 
-# logits = model(video=vid, audio=aud, text=text)[:, -1, :]
-# print(logits.shape)
-# import sys; sys.exit()
+    # logits = model(video=vid, audio=aud, text=text)[:, -1, :]
+    # print(logits.shape)
+    # import sys; sys.exit()
 
 
 
 
-torch.set_float32_matmul_precision('high')
-summary = ModelSummary(model, max_depth=2)
-print(summary)
+    torch.set_float32_matmul_precision('high')
+    summary = ModelSummary(model, max_depth=2)
+    print(summary)
 
-debug = False
-trainer = L.Trainer(
-    accelerator='auto',
-    devices=1,
-    max_epochs=epochs,
-    # callbacks=[early_stopping],
-    callbacks=[checkpoint_callback],
-    logger=wandb_logger if not debug else None,
-    precision='bf16-mixed',
-    log_every_n_steps=1,
-)
-# ckpt_path = "/home/pranav/mihir/algonauts_challenge/algonauts2025/checkpoints/fus_5l_12sw_5lr_drop1/step=97152-val_pearson_r=0.2384.ckpt"
-ckpt_path = None
-trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path if ckpt_path else None)
-wandb.finish()
+    debug = False
+    trainer = L.Trainer(
+        accelerator='auto',
+        devices=1,
+        max_epochs=epochs,
+        # callbacks=[early_stopping],
+        callbacks=[checkpoint_callback],
+        logger=wandb_logger if not debug else None,
+        precision='bf16-mixed',
+        log_every_n_steps=1,
+        gradient_clip_val=1.0
+    )
+    # ckpt_path = "/home/mihirneal/Developer/algonauts/algonauts2025/checkpoints/alg_extTrain/Int20_Whis12_Lla7_baseline/step=62550-val_pearson_r=0.2967.ckpt"
+    ckpt_path = None
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path if ckpt_path else None)
+    wandb.finish()
 
 

@@ -19,7 +19,9 @@ from pathlib import Path
 import zipfile
 import sys
 from functools import partial
+from scipy.stats import pearsonr
 import math
+from fmri_vae import fMRILinearAE
 from utils import load_fmri, align_features_and_fmri_samples, align_features_and_fmri_samples_friends_s7, CosineLRSchedulerWithWarmup, calculate_metrics, normalize, normalize_across_episodes, check_fmri_centering, CosineAnnealingWarmDecayedRestarts
 
 class AlgonautsDataset(Dataset):
@@ -47,19 +49,12 @@ class AlgonautsDataset(Dataset):
                         
                         for modality in ['audio', 'visual']:
                             with h5py.File(self.features_dir[modality] / modality / f"{episode_base}_features_{modality}.h5", 'r') as f:
-                                # if modality == "visual":
-                                    # print(f.keys())
-                                    # # print(f[''].shape)
-                                    # # print(f['model.layers.5.post_attention_layernorm'].shape)
-                                    # # print(f['model.norm'].shape)
-                                    # import sys; sys.exit()
                                 try:
-                                    # stimuli_features[modality][episode_base.split('_')[1]] = f['model.layers.10.post_attention_layernorm'][:] #(591, 1, 1280)
                                     stimuli_features[modality][episode_base.split('_')[1]] = f['language_model.model.layers.20.post_attention_layernorm'][:] #(453, 3584)
                                     # stimuli_features[modality][episode_base.split('_')[1]] = f[episode_base.split('_')[1]][modality][:]
                                 except:
                                     try:
-                                        stimuli_features[modality][episode_base.split('_')[1]] = f['layers.12.fc2'][:]
+                                        stimuli_features[modality][episode_base.split('_')[1]] = f['layers.31.fc2'][:]
                                     except:
                                         print("error friends vid/aud")
                                         f.visit(lambda x: print(x))
@@ -72,7 +67,7 @@ class AlgonautsDataset(Dataset):
                 #         episode_base = episode.split('_features_')[0]
                     for ep in lang_dir_list:
                         try:
-                            stimuli_features['language'][ep] = f[ep]['model.layers.7'][:]
+                            stimuli_features['language'][ep] = f[ep]['model.layers.11'][:]
                         except:
                             print("error friends lang")
                             f.visit(lambda x: print(x))
@@ -85,17 +80,12 @@ class AlgonautsDataset(Dataset):
                     
                     for modality in ['audio', 'visual']:
                         with h5py.File(self.features_dir[modality] / modality / f"{partition_base}_features_{modality}.h5", 'r') as f:
-                            # if modality == 'visual':
-                            #     print(f.keys())
-                            #     print('movie end')
-                            #     import sys; sys.exit()
                             try:
-                                # stimuli_features[modality][partition_base] = f['model.layers.10.post_attention_layernorm'][:]
                                 stimuli_features[modality][partition_base] = f['language_model.model.layers.20.post_attention_layernorm'][:]
                                 # stimuli_features[modality][partition_base] = f[partition_base][modality][:]
                             except:
                                 try:
-                                    stimuli_features[modality][partition_base] = f['layers.12.fc2'][:]
+                                    stimuli_features[modality][partition_base] = f['layers.31.fc2'][:]
                                 except:
                                     print("error movie vid/aud")
                                     f.visit(lambda x: print(x))
@@ -105,7 +95,7 @@ class AlgonautsDataset(Dataset):
                     lang_dir_list = f.keys()
                     for base in lang_dir_list:
                         try:
-                            stimuli_features['language'][base] = f[base]['model.layers.7'][:]
+                            stimuli_features['language'][base] = f[base]['model.layers.11'][:]
                         except:
                             print("error movie lang")
                             f.visit(lambda x: print(x))
@@ -286,6 +276,10 @@ class MMDTemporal(L.LightningModule):
             nn.Dropout(self.dropout_prob),
             nn.Linear(self.latent_dim, self.latent_dim)
         )
+        self.vqvae = fMRILinearAE.load_from_checkpoint("/home/mihirneal/Developer/algonauts/algonauts2025/checkpoints/fmri_linearAE/baseline_256dim/epoch=43_val_pearson_r=0.900.ckpt")
+        # for param in self.vqvae.autoencoder.parameters():
+        #     param.requires_grad = False 
+        # self.vqvae.eval()
 
         # temp_enc = nn.TransformerEncoderLayer(
         #     d_model=self.latent_dim, 
@@ -340,20 +334,34 @@ class MMDTemporal(L.LightningModule):
             nn.Dropout(0.5)
         )
 
+        # self.temporal_agg = nn.Sequential(
+        #     nn.Linear(self.stimulus_window, 1),
+        #     # nn.GELU(),
+        #     # nn.Linear(6, 1)
+        # )
+
         self.temporal_agg = nn.Linear(self.stimulus_window, 1)
 
         # --- Final Projection to fMRI space ---
         # Input dim will be self.time_specific_hidden_dim
+
+        # self.fmri_proj = nn.Sequential(
+        #     nn.Linear(self.latent_dim, self.latent_dim),
+        #     nn.GELU(),
+        #     nn.Dropout(self.dropout_prob),
+        #     # nn.Linear(self.latent_dim, self.latent_dim),
+        #     # nn.GELU(),
+        #     # nn.Dropout(self.dropout_prob),
+        #     nn.Linear(self.latent_dim, 1000)
+        # )
+
+        self.fmri_proj = nn.Linear(self.time_specific_hidden_dim, 768)
+
+
+
+
         # self.fmri_proj = nn.Linear(self.time_specific_hidden_dim, 1000) 
-        self.fmri_proj = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
-            nn.GELU(),
-            nn.Dropout(self.dropout_prob),
-            # nn.Linear(self.latent_dim, self.latent_dim),
-            # nn.GELU(),
-            # nn.Dropout(self.dropout_prob),
-            nn.Linear(self.latent_dim, 1000)
-        ) 
+        
         self.save_hyperparameters()
 
     def forward(self, video, audio, text):
@@ -412,6 +420,8 @@ class MMDTemporal(L.LightningModule):
         # 2. Post-Convolution Norm, Activation, Dropout
         # Input (B, T, H_out), Output (B, T, H_out)
         time_processed_seq = self.post_tsp(time_processed_seq)
+
+        
         
         # 3. Residual MLP Blocks
         # Input (B, T, H_out), Output (B, T, H_out)
@@ -421,20 +431,38 @@ class MMDTemporal(L.LightningModule):
         aggregated_features = time_processed_seq.permute(0, 2, 1) # (B, H_out, T)
         
         aggregated_features = self.temporal_agg(aggregated_features).squeeze(-1) # (B, H_out)
-        
+        fproj = self.fmri_proj(aggregated_features)
         # aggregated_features is now (B, H_out = time_specific_hidden_dim)
 
         # 5. Final Projection to fMRI
-        fmri_recon = self.fmri_proj(aggregated_features) # (B, 1000)
+        # fmri_recon = self.fmri_proj(aggregated_features) # (B, 1000)
         
-        return fmri_recon
+        return fproj
+    # @torch.compiler.disable
+    # def calculate_pearson(self, pred, target):
+    #     pred_np = pred.float().detach().cpu().numpy()
+    #     target_np = target.float().detach().cpu().numpy()
+    #     pearson_r = pearsonr(pred_np.flatten(), target_np.flatten())[0]
+
+    #     return pearson_r
 
     def training_step(self, batch, batch_idx):
         vision, audio, text, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
-        recon_fmri = self(vision, audio, text)
+        fmri_emb = self.vqvae.autoencoder.encoder(fmri)
+        recon_emb = self(vision, audio, text)
 
-        mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
-        cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri, dim=1)).mean()
+        recon_fmri = self.vqvae.autoencoder.decoder(recon_emb)
+
+        mse = F.mse_loss(recon_fmri, fmri)
+        # mse = F.mse_loss(recon_emb, fmri_emb)
+        mae = F.l1_loss(recon_fmri, fmri)
+        # mae = F.l1_loss(recon_emb, fmri_emb)
+
+        # pearson_r = self.calculate_pearson(pred=recon_fmri, target=fmri)
+
+        _, _, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        # mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        cosine_loss = (1 - F.cosine_similarity(recon_emb, fmri_emb, dim=1)).mean()
         loss = self.alpha * mse + ((1 - self.alpha) * cosine_loss)
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -446,11 +474,22 @@ class MMDTemporal(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         vision, audio, text, fmri= batch['video'], batch['audio'], batch['language'], batch['fmri']
-        # audio = audio.squeeze() # Already squeezed in forward
-        recon_fmri = self(vision, audio, text)
+        fmri_emb = self.vqvae.autoencoder.encoder(fmri)
+        # print("fmri emb: ", fmri_emb.shape) 
+        recon_emb = self(vision, audio, text)
+        # print("recon_emb: ", recon_emb.shape)
 
-        mae, mse, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
-        cosine_loss = (1 - F.cosine_similarity(recon_fmri, fmri, dim=1)).mean()
+        recon_fmri = self.vqvae.autoencoder.decoder(recon_emb)
+        # print("recon_fmri: ", recon_fmri.shape)
+
+        mse = F.mse_loss(recon_fmri, fmri)
+        # mse = F.mse_loss(recon_emb, fmri_emb)
+        mae = F.l1_loss(recon_fmri, fmri)
+        # mae = F.l1_loss(recon_emb, fmri_emb) 
+
+        _, _, _, pearson_r, _ = calculate_metrics(pred=recon_fmri, target=fmri)
+        # pearson_r = self.calculate_pearson(pred=recon_fmri, target=fmri)
+        cosine_loss = (1 - F.cosine_similarity(recon_emb, fmri_emb, dim=1)).mean()
         loss = (self.alpha * mse) + ((1 - self.alpha) * cosine_loss)
 
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True) # Corrected on_step for val
@@ -500,11 +539,11 @@ class MMDTemporal(L.LightningModule):
         }
 
 if __name__ == '__main__':
-    L.seed_everything(42, workers=True)
+
     root_dir = Path('/home/mihirneal/Developer/')
 
     vision_dir = root_dir / 'algonauts/internvl3_8b_8bit/'
-    # vision_dir = root_dir / 'algonauts/qwen_omni3-5'
+    # vision_dir = root_dir / 'algonauts/qwen_2.5omni-7B/'
     # vision_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
     # audio_dir = '/home/pranav/mihir/algonauts_challenge/AlgonautsDS-features/developer_kit/stimulus_features/raw/'
     audio_dir = root_dir / 'algonauts/whisper/'
@@ -561,11 +600,10 @@ if __name__ == '__main__':
 
 
 
-    project = "alg_layerablation"
+    project = "alg_fmriVAE"
     # run_name = "test"
     # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
-    # run_name = "Int20_Whis25_Ll7_drop2"
-    run_name = "Int20_Whis12_Lla7_baseline"
+    run_name = "baseline_FT_LinAEle1e5"
     wandb_logger = WandbLogger(
         project=project,
         name=run_name,
@@ -587,7 +625,7 @@ if __name__ == '__main__':
         verbose=True,
         min_delta=1e-4
     )
-    epochs =15
+    epochs = 15
     config = {
         'latent_dim': 1024,
         'codebook_size': 1000,
@@ -595,7 +633,7 @@ if __name__ == '__main__':
         'audio_proj_dim': 1024,
         'learning_rate': 1e-5,
         'minlr_mult': 0.001, 
-        'dropout_prob': 0.4, #def 0.1
+        'dropout_prob': 0.3, #def 0.1
         'encoder_dropout_prob': 0.1,
         'num_layers': 4, #def: 6
         'num_attn_heads': 8,
@@ -606,14 +644,14 @@ if __name__ == '__main__':
         'hrf_delay': hrf_delay,
         'decay_factor': 0.2,
         'epochs': epochs,
-        'warmup_epochs': None,
+        'warmup_epochs': 3,
     }
 
     model = MMDTemporal(config)
     # model = torch.compile(model)
 
-    # vis = torch.randn(32, 15, 3584)
-    # aud = torch.randn(32, 15, 1, 1280)
+    # vis = torch.randn(32, 12, 3584)
+    # aud = torch.randn(32, 12, 1, 1280)
     # lang = torch.randn(32, 2048)
 
     # recon_fmri = model(video=vis, audio=aud, text=lang)
@@ -624,8 +662,7 @@ if __name__ == '__main__':
     summary = ModelSummary(model, max_depth=2)
     print(summary)
 
-    # model = torch.compile(model)
-    debug = False
+    debug = False 
     trainer = L.Trainer(
         accelerator='auto',
         devices=1,
