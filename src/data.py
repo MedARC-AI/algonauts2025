@@ -3,6 +3,7 @@
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import h5py
@@ -15,17 +16,34 @@ SUBJECTS = (1, 2, 3, 5)
 class Algonauts2025Dataset(IterableDataset):
     def __init__(
         self,
-        fmri_data: dict[str, np.ndarray],
+        episode_list: list[str | tuple[str, int]],
+        fmri_data: dict[str, np.ndarray] | None = None,
         feat_data: list[dict[str, np.ndarray]] | None = None,
         sample_length: int | None = 128,
         num_samples: int | None = None,
         shuffle: bool = True,
         seed: int | None = None,
     ):
+        assert fmri_data or feat_data, "fmri or features required"
+
+        # subset to requested episodes
+        if fmri_data:
+            fmri_data = {ep: fmri_data[ep] for ep in episode_list}
+
+        if feat_data:
+            feat_data = [
+                {
+                    # no run in the feature episodes.
+                    ep: layer_feat_data[ep[0] if isinstance(ep, tuple) else ep]
+                    for ep in episode_list
+                }
+                for layer_feat_data in feat_data
+            ]
+
+        self.episode_list = episode_list
         self.fmri_data = fmri_data
         self.feat_data = feat_data
 
-        self.episode_list = list(fmri_data)
         self.sample_length = sample_length
         self.num_samples = num_samples
         self.shuffle = shuffle
@@ -35,51 +53,45 @@ class Algonauts2025Dataset(IterableDataset):
 
     def _iter_shuffle(self):
         sample_idx = 0
+
         while True:
             episode_order = self._rng.permutation(len(self.episode_list))
 
             for ii in episode_order:
                 episode = self.episode_list[ii]
-                feat_episode = episode[0] if isinstance(episode, tuple) else episode
 
-                fmri = torch.from_numpy(self.fmri_data[episode]).float()
-
-                if self.feat_data:
-                    feats = [
-                        torch.from_numpy(data[feat_episode]).float()
-                        for data in self.feat_data
-                    ]
-                else:
-                    feats = feat_samples = None
-
-                # Nb, fmri and feature length often off by 1 or 2.
-                # But assuming time locked to start.
-                length = fmri.shape[1]
-                if feats:
-                    length = min(length, min(feat.shape[0] for feat in feats))
+                # (subs, length, dim) and list of (length, dim)
+                fmri, feats, length = self._get_fmri_feats(episode)
 
                 if self.sample_length:
                     # Random segment of run
-                    offset = int(self._rng.integers(0, length - self.sample_length + 1))
-                    fmri_sample = fmri[:, offset : offset + self.sample_length]
-                    if feats:
+                    offset = self._rng.integers(0, length - self.sample_length + 1)
+                    if fmri is not None:
+                        fmri_sample = fmri[:, offset : offset + self.sample_length]
+                    if feats is not None:
                         feat_samples = [
                             feat[offset : offset + self.sample_length] for feat in feats
                         ]
                 else:
                     # Take full run
                     # Nb this only works for batch size 1 since runs are different length
-                    fmri_sample = fmri[:, :length]
-                    if feats:
+                    if fmri is not None:
+                        fmri_sample = fmri[:, :length]
+                    if feats is not None:
                         feat_samples = [feat[:length] for feat in feats]
 
-                shapes = [fmri_sample.shape] + [feat.shape for feat in feat_samples]
-                print("shapes:", shapes)
-
-                if feat_samples:
-                    yield episode, fmri_sample, feat_samples
+                if isinstance(episode, tuple):
+                    episode, run = episode
                 else:
-                    yield episode, fmri_sample
+                    run = 1
+
+                sample = {"episode": episode, "run": run}
+                if fmri is not None:
+                    sample["fmri"] = fmri_sample
+                if feats is not None:
+                    sample["features"] = feat_samples
+
+                yield sample
 
                 sample_idx += 1
                 if self.num_samples and sample_idx >= self.num_samples:
@@ -87,55 +99,72 @@ class Algonauts2025Dataset(IterableDataset):
 
     def _iter_ordered(self):
         sample_idx = 0
-        for episode in self.episode_list:
-            feat_episode = episode[0] if isinstance(episode, tuple) else episode
-            fmri = torch.from_numpy(self.fmri_data[episode]).float()
-            if self.feat_data:
-                feats = [
-                    torch.from_numpy(data[feat_episode]).float()
-                    for data in self.feat_data
-                ]
-            else:
-                feats = feat_samples = None
 
-            length = fmri.shape[1]
-            if feats:
-                length = min(length, min(feat.shape[0] for feat in feats))
+        for episode in self.episode_list:
+            # (subs, length, dim) and list of (length, dim)
+            fmri, feats, length = self._get_fmri_feats(episode)
+
+            if isinstance(episode, tuple):
+                episode, run = episode
+            else:
+                run = 1
 
             sample_length = self.sample_length or length
 
             for offset in range(0, length - sample_length + 1, sample_length):
-                fmri_sample = fmri[:, offset : offset + sample_length]
+                if fmri is not None:
+                    fmri_sample = fmri[:, offset : offset + sample_length]
                 if feats:
                     feat_samples = [
                         feat[offset : offset + sample_length] for feat in feats
                     ]
 
-                if feat_samples:
-                    yield episode, fmri_sample, feat_samples
-                else:
-                    yield episode, fmri_sample
+                sample = {"episode": episode, "run": run}
+                if fmri is not None:
+                    sample["fmri"] = fmri_sample
+                if feats is not None:
+                    sample["features"] = feat_samples
+
+                yield sample
 
                 sample_idx += 1
                 if self.num_samples and sample_idx >= self.num_samples:
                     return
+
+    def _get_fmri_feats(
+        self, episode: str | tuple[str, int]
+    ) -> tuple[torch.Tensor | None, list[torch.Tensor] | None, int]:
+        if self.fmri_data:
+            # shape (subs, length, dim)
+            fmri = torch.from_numpy(self.fmri_data[episode]).float()
+            fmri_length = fmri.shape[1]
+        else:
+            fmri = fmri_length = None
+
+        if self.feat_data:
+            # each shape (length, dim)
+            feats = [torch.from_numpy(data[episode]).float() for data in self.feat_data]
+            # TODO: not all features same length. don't know why exactly.
+            feat_length = min(feat.shape[0] for feat in feats)
+        else:
+            feats = feat_length = None
+
+        # Nb, fmri and feature length often off by 1 or 2.
+        # But assuming time locked to start.
+        if fmri_length and feat_length:
+            length = min(fmri_length, feat_length)
+            fmri = fmri[:, :length]
+            feats = [feat[:length] for feat in feats]
+        else:
+            length = fmri_length or feat_length
+
+        return fmri, feats, length
 
     def __iter__(self):
         if self.shuffle:
             yield from self._iter_shuffle()
         else:
             yield from self._iter_ordered()
-
-
-def parse_friends_run(run: str):
-    match = re.match(r"s([0-9]+)e([0-9]+)([a-z])", run)
-    if match is None:
-        raise ValueError(f"Invalid friends run {run}")
-
-    season = int(match.group(1))
-    episode = int(match.group(2))
-    part = match.group(3)
-    return season, episode, part
 
 
 def load_algonauts2025_friends_fmri(
@@ -145,7 +174,8 @@ def load_algonauts2025_friends_fmri(
 ) -> dict[str, np.ndarray]:
     """load friends fmri data.
 
-    returns a big dictionary mapping episode -> data. episode is like "s01e01a".
+    returns a big dictionary mapping episode -> data. episode is like "s01e01a". the
+    data are aligned and stacked across subjects, resulting in shape (subs, length, dim).
 
     root: path to algonauts_2025.competitors directory
     """
@@ -194,6 +224,17 @@ def load_algonauts2025_friends_fmri(
     return data
 
 
+def parse_friends_run(run: str):
+    match = re.match(r"s([0-9]+)e([0-9]+)([a-z])", run)
+    if match is None:
+        raise ValueError(f"Invalid friends run {run}")
+
+    season = int(match.group(1))
+    episode = int(match.group(2))
+    part = match.group(3)
+    return season, episode, part
+
+
 def load_algonauts2025_movie10_fmri(
     root: str | Path,
     subjects: list[int] | None = None,
@@ -204,7 +245,8 @@ def load_algonauts2025_movie10_fmri(
 
     returns a big dictionary mapping (episode, run) -> data. "episode" is movie and part
     like "bourne01". run refers to repeat run, 1 or 2. run defaults to 1 for movies
-    without repeats.
+    without repeats. the data are aligned and stacked across subjects, resulting in
+    shape (subs, length, dim).
 
     root: path to algonauts_2025.competitors directory
     runs: which of repeat runs to include. subset of [1, 2]. not that if you pick 2,
@@ -295,3 +337,36 @@ def load_merged_features(path: str | Path, layer: str) -> dict[str, np.ndarray]:
     with h5py.File(path) as f:
         features = {k: f[k][layer][:] for k in f}
     return features
+
+
+def episode_filter(
+    seasons: list[str] | None = None,
+    movies: list[str] | None = None,
+    runs: list[int] | None = None,
+) -> Callable[[str | tuple[str, int]], bool]:
+    seasons = set(seasons) if seasons is not None else set(range(1, 6))
+    movies = set(movies) if movies is not None else {"bourne", "wolf"}
+    runs = set(runs) if runs is not None else {1, 2}
+
+    def _filter(episode: str | tuple[str, int]) -> bool:
+        if isinstance(episode, tuple):
+            episode, run = episode
+        else:
+            run = 1
+
+        if episode.startswith("s0"):
+            season, _, _ = parse_friends_run(episode)
+            if season not in seasons:
+                return False
+
+        else:
+            movie, _ = parse_movie10_run(episode)
+            if movie not in movies:
+                return False
+
+        if run not in runs:
+            return False
+
+        return True
+
+    return _filter
