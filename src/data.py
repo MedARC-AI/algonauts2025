@@ -346,7 +346,7 @@ def episode_filter(
 ) -> Callable[[str | tuple[str, int]], bool]:
     seasons = set(seasons) if seasons is not None else set(range(1, 6))
     movies = set(movies) if movies is not None else {"bourne", "wolf"}
-    runs = set(runs) if runs is not None else {1, 2}
+    runs = set(runs) if runs is not None else {1}
 
     def _filter(episode: str | tuple[str, int]) -> bool:
         if isinstance(episode, tuple):
