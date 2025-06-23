@@ -16,20 +16,22 @@ from data import (
     Algonauts2025Dataset,
     load_algonauts2025_friends_fmri,
     load_algonauts2025_movie10_fmri,
+    load_merged_features,
+    load_sharded_features,
     episode_filter,
 )
-from models import CrossSubjectConvLinearEncoder
+from models import MultiSubjectConvLinearEncoder
 from utils import pearsonr_score, get_sha
 
 SUBJECTS = (1, 2, 3, 5)
 
 ROOT = Path(__file__).parent
-DATA_DIR = ROOT / "datasets/algonauts_2025.competitors"
-DEFAULT_CONFIG = ROOT / "config/default_cross_encoding.yaml"
+DATA_DIR = ROOT / "datasets"
+DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
 
 
 def main(cfg: DictConfig):
-    print("training cross-subject fmri encoder")
+    print("training multi-subject fmri encoder")
 
     sha_info = get_sha()
     print(sha_info)
@@ -57,13 +59,37 @@ def main(cfg: DictConfig):
     val_loaders = data_loaders.copy()
     val_loaders.pop("train")
 
+    batch = next(iter(train_loader))
+    feat_dims = [feat.shape[-1] for feat in batch["features"]]
+    print("feat dims:", feat_dims)
+
     print("creating model")
-    model = CrossSubjectConvLinearEncoder(**cfg.model)
+    model = MultiSubjectConvLinearEncoder(
+        feat_dims=feat_dims,
+        **cfg.model,
+    )
+    print("model:", model)
+
+    if cfg.checkpoint:
+        print("loading checkpoint:", cfg.checkpoint)
+        ckpt = torch.load(cfg.checkpoint, map_location="cpu", weights_only=False)
+        missing_keys, unexpected_keys = model.load_state_dict(
+            ckpt["model"],
+            strict=False,
+        )
+        print("missing_keys:", missing_keys)
+        print("unexpected:", unexpected_keys)
+
+    if cfg.freeze_decoder:
+        for p in model.shared_decoder.parameters():
+            p.requires_grad_(False)
+        for p in model.subject_decoders.parameters():
+            p.requires_grad_(False)
+
     model = model.to(device)
 
     param_count = sum(p.numel() for p in model.parameters())
     param_count_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("model:", model)
     print(
         f"num params (train): {param_count / 1e6:.2f} ({param_count_train / 1e6:.2f}M)"
     )
@@ -129,10 +155,21 @@ def main(cfg: DictConfig):
 
 
 def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
-    friends_fmri = load_algonauts2025_friends_fmri(DATA_DIR, subjects=SUBJECTS)
-    movie10_fmri = load_algonauts2025_movie10_fmri(DATA_DIR, subjects=SUBJECTS)
+    print("loading fmri data")
+    friends_fmri = load_algonauts2025_friends_fmri(
+        DATA_DIR / "algonauts_2025.competitors", subjects=SUBJECTS
+    )
+    movie10_fmri = load_algonauts2025_movie10_fmri(
+        DATA_DIR / "algonauts_2025.competitors", subjects=SUBJECTS
+    )
     all_fmri = {**friends_fmri, **movie10_fmri}
     all_episodes = list(all_fmri)
+
+    all_features = []
+    for feat_cfg in cfg.features:
+        print(f"loading features:\n\n{OmegaConf.to_yaml(feat_cfg)}")
+        features = load_features(**feat_cfg)
+        all_features.append(features)
 
     data_loaders = {}
 
@@ -148,6 +185,7 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
         dataset = Algonauts2025Dataset(
             episode_list=ds_episodes,
             fmri_data=all_fmri,
+            feat_data=all_features,
             **ds_cfg,
         )
 
@@ -157,6 +195,47 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
         data_loaders[ds_name] = loader
 
     return data_loaders
+
+
+MODEL_FEATURE_TYPES = {
+    "internvl3_8b_8bit": "sharded",
+    "whisper": "sharded",
+    "meta-llama__Llama-3.2-1B": "merged",
+}
+
+
+def load_features(
+    model: str,
+    layer: str,
+    stem: str | None = None,
+) -> dict[str, np.ndarray]:
+    feat_type = MODEL_FEATURE_TYPES[model]
+
+    if feat_type == "sharded":
+        assert stem is None, "stem not used"
+        friends_features = load_sharded_features(
+            DATA_DIR / "features.sharded", model=model, layer=layer, series="friends"
+        )
+        movie10_features = load_sharded_features(
+            DATA_DIR / "features.sharded", model=model, layer=layer, series="movie10"
+        )
+    else:
+        friends_features = load_merged_features(
+            DATA_DIR / "features.merged",
+            model=model,
+            layer=layer,
+            series="friends",
+            stem=stem,
+        )
+        movie10_features = load_merged_features(
+            DATA_DIR / "features.merged",
+            model=model,
+            layer=layer,
+            series="movie10",
+            stem=stem,
+        )
+    features = {**friends_features, **movie10_features}
+    return features
 
 
 def train_one_epoch(
@@ -181,12 +260,14 @@ def train_one_epoch(
     end = time.monotonic()
     for batch_idx, batch in enumerate(train_loader):
         sample = batch["fmri"]
+        feats = batch["features"]
         sample = sample.to(device)
+        feats = [feat.to(device) for feat in feats]
         batch_size = sample.size(0)
         data_time = time.monotonic() - end
 
         # forward pass
-        output = model(sample)
+        output = model(feats)
         loss = F.mse_loss(output, sample)
         loss_item = loss.item()
 
@@ -246,11 +327,13 @@ def evaluate(
 
     for batch_idx, batch in enumerate(val_loader):
         sample = batch["fmri"]
+        feats = batch["features"]
         sample = sample.to(device)
+        feats = [feat.to(device) for feat in feats]
         batch_size = sample.size(0)
 
         # forward pass
-        output = model(sample)
+        output = model(feats)
         loss = F.mse_loss(output, sample)
         loss_item = loss.item()
 

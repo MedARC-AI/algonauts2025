@@ -1,0 +1,66 @@
+out_dir: output/feature_encoding
+
+model:
+  embed_dim: 64
+  encoder_kernel_size: 33
+  decoder_kernel_size: 0
+  encoder_causal: true
+
+
+features:
+  - model: internvl3_8b_8bit
+    layer: language_model.model.layers.20.post_attention_layernorm
+
+  - model: whisper
+    layer: layers.12.fc2
+
+  - model: meta-llama__Llama-3.2-1B
+    layer: model.layers.7
+    stem: context-long
+
+
+datasets:
+  train:
+    filter:
+      seasons: [1, 2, 3, 4, 5]
+      movies: ["bourne", "wolf"]
+    sample_length: 256
+    num_samples: 500
+    shuffle: True
+    seed: 42
+
+  val_s6:
+    filter:
+      seasons: [6]
+      movies: []
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_figures:
+    filter:
+      seasons: []
+      movies: ["figures"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_life:
+    filter:
+      seasons: []
+      movies: ["life"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+batch_size: 4
+lr: 3e-4
+weight_decay: 0.1
+epochs: 10
+
+checkpoint: null
+freeze_decoder: false
+
+seed: 3315
+overwrite: false
+device: cuda

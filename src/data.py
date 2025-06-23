@@ -329,11 +329,22 @@ def load_sharded_features(
     return features
 
 
-def load_merged_features(path: str | Path, layer: str) -> dict[str, np.ndarray]:
+def load_merged_features(
+    root: str | Path,
+    model: str,
+    layer: str,
+    series: str = "friends",
+    stem: str | None = None,
+) -> dict[str, np.ndarray]:
     """Load features from a merged h5 file.
 
     Connor makes these, bc he's annoying.
     """
+    if stem is None:
+        path = Path(root) / f"{series}/{model}.h5"
+    else:
+        path = Path(root) / f"{series}/{model}/{stem}.h5"
+
     with h5py.File(path) as f:
         features = {k: f[k][layer][:] for k in f}
     return features

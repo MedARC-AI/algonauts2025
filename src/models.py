@@ -107,6 +107,28 @@ class LinearConv(nn.Module):
         return x
 
 
+class FeatEmbed(nn.Module):
+    def __init__(
+        self,
+        feat_dim: int = 2048,
+        embed_dim: int = 256,
+        kernel_size: int = 33,
+        causal: bool = True,
+        normalize: bool = True,
+    ):
+        super().__init__()
+        self.norm = nn.LayerNorm(feat_dim) if normalize else nn.Identity()
+        if kernel_size > 1:
+            self.embed = LinearConv(
+                feat_dim, embed_dim, kernel_size=kernel_size, causal=causal
+            )
+        else:
+            self.embed = nn.Linear(feat_dim, embed_dim)
+
+    def forward(self, input: torch.Tensor):
+        return self.embed(self.norm(input))
+
+
 class CrossSubjectConvLinearEncoder(nn.Module):
     weight: torch.Tensor
 
@@ -210,6 +232,62 @@ class CrossSubjectConvLinearEncoder(nn.Module):
         else:
             subject_outputs = 0.0
         output = shared_output + subject_outputs
+        return output
+
+
+class MultiSubjectConvLinearEncoder(nn.Module):
+    weight: torch.Tensor
+
+    def __init__(
+        self,
+        num_subjects: int = 4,
+        feat_dims: tuple[int, ...] = (2048,),
+        embed_dim: int = 256,
+        target_dim: int = 1000,
+        encoder_kernel_size: int = 33,
+        decoder_kernel_size: int = 0,
+        encoder_causal: bool = True,
+        encoder_normalize: bool = True,
+    ):
+        super().__init__()
+        self.num_subjects = num_subjects
+
+        self.feat_embeds = nn.ModuleList(
+            [
+                FeatEmbed(
+                    feat_dim,
+                    embed_dim,
+                    kernel_size=encoder_kernel_size,
+                    causal=encoder_causal,
+                    normalize=encoder_normalize,
+                )
+                for feat_dim in feat_dims
+            ]
+        )
+
+        if decoder_kernel_size > 1:
+            decoder_linear = partial(ConvLinear, kernel_size=decoder_kernel_size)
+        else:
+            decoder_linear = nn.Linear
+
+        self.shared_decoder = nn.Linear(embed_dim, target_dim)
+        self.subject_decoders = nn.ModuleList(
+            [decoder_linear(embed_dim, target_dim) for _ in range(num_subjects)]
+        )
+        self.apply(init_weights)
+
+    def forward(self, inputs: list[torch.Tensor]):
+        # input: (N, L, D)
+        # output: (N, S, L, C)
+        embed = sum(
+            feat_embed(input) for input, feat_embed in zip(inputs, self.feat_embeds)
+        )
+        shared_output = self.shared_decoder(embed)
+        subject_output = torch.stack(
+            [decoder(embed) for decoder in self.subject_decoders],
+            dim=1,
+        )
+        output = subject_output + shared_output[:, None]
         return output
 
 
