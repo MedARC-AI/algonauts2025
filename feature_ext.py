@@ -15,8 +15,8 @@ import os
 
 from pathlib import Path
 
-root_dir = Path("/home/mihirneal/Developer/algonauts/")
-output_dir = "/home/"
+root_dir = Path("/home/mihir/projects/datasets/")
+output_dir = root_dir
 os.path.exists(root_dir / "algonauts_2025.competitors")
 
 
@@ -174,9 +174,14 @@ def load_audio(
     Returns:
         tuple: (waveform_fp16, sampling_rate) where waveform_fp16 is a tensor in float16.
     """
+
+    import os
+    ffmpeg_dir = "/home/mihir/projects/datasets/.venv/bin"
+    os.environ['PATH'] = ffmpeg_dir + os.pathsep + os.environ.get('PATH', '')
+    
     try:
         # Set the backend to 'ffmpeg' if available
-        torchaudio.set_audio_backend("ffmpeg")
+        # torchaudio.set_audio_backend("ffmpeg")
         waveform, orig_sr = torchaudio.load(path)
 
         # Convert to mono if stereo is False and the waveform has multiple channels
@@ -896,9 +901,10 @@ def split_model(model_name_or_path):
     return device_map
 
 # now load your model & tokenizer
-path = 'OpenGVLab/InternVL3-8B'
-device_map = split_model(path)
-cache_dir = "/home/mihirneal/Developer/hf_cache"
+path = 'OpenGVLab/InternVL3-14B'
+# device_map = split_model(path)
+cache_dir = "/home/mihir/projects/hf_cache"
+os.makedirs(cache_dir, exist_ok=True)
 model = AutoModel.from_pretrained(
     path,
     torch_dtype=torch.bfloat16,
@@ -907,9 +913,9 @@ model = AutoModel.from_pretrained(
     low_cpu_mem_usage=True,
     use_flash_attn=True,
     trust_remote_code=True,
-    device_map=device_map
+    # device_map=device_map
 ).eval()
-
+model = model.to("cuda:1")
 tokenizer = AutoTokenizer.from_pretrained(
     path,
     trust_remote_code=True,
@@ -1518,52 +1524,56 @@ def logits_by_pair(extractor, tokenizer,
     return logits, token_ranges, avg_logits
 
 print(model)
-import sys; sys.exit()
+# import sys; sys.exit()
 
+# print(model.mlp1)
+# import sys; sys.exit()
 
 layers_to_extract = layers_to_extract = [
-    "language_model.model.layers.10.post_attention_layernorm",
-    "language_model.model.layers.15.post_attention_layernorm",
     "language_model.model.layers.20.post_attention_layernorm",
-    "language_model.model.norm"
+    "language_model.model.layers.30.post_attention_layernorm",
+    "language_model.model.layers.40.post_attention_layernorm",
+    "language_model.model.layers.47.post_attention_layernorm",
+    "language_model.model.norm",
+    "mlp1.3"
 ]
 
 # Use the feature extractor as a context manager so that hooks are cleaned up automatically.
-with HuggingFaceFeatureExtractor(model, layers_to_extract, detach=True) as extractor:
-    with torch.no_grad():
-        # # Run a forward pass. The extractor clears previous features automatically.
-        # outputs = extractor(inputs['pixel_values'].to('cuda'))
+# with HuggingFaceFeatureExtractor(model, layers_to_extract, detach=True) as extractor:
+#     with torch.no_grad():
+#         # # Run a forward pass. The extractor clears previous features automatically.
+#         # outputs = extractor(inputs['pixel_values'].to('cuda:1'))
 
-        # # Retrieve the extracted features.
-        # features = extractor.features
+#         # # Retrieve the extracted features.
+#         # features = extractor.features
 
-        # # Print out the shape of the main model output.
-        # print("Main model output (last_hidden_state) shape:", outputs.shape)
+#         # # Print out the shape of the main model output.
+#         # print("Main model output (last_hidden_state) shape:", outputs.shape)
 
-        # # Iterate over the extracted features and print their shapes.
-        # for layer_name, activation in features.items():
-        #     print(f"Layer: {layer_name}, Feature shape: {activation.shape}")
-        pixel_values = pixel_values
-        sentences = [['primera', 'oracion', 'nnn en'], ['segunda', 'oracion', 'a veces 222']]
+#         # # Iterate over the extracted features and print their shapes.
+#         # for layer_name, activation in features.items():
+#         #     print(f"Layer: {layer_name}, Feature shape: {activation.shape}")
+#         pixel_values = pixel_values
+#         sentences = [['primera', 'oracion', 'nnn en'], ['segunda', 'oracion', 'a veces 222']]
 
-        logits, ranges, avg_logits = logits_by_pair(
-            extractor, tokenizer,
-            pixel_values, sentences,
-            use_template=False   # or True
-        )
-        print(logits.shape)        # [1, seq_len, 151674]
-        print(ranges)              # e.g. [(0,160), (161,280), ...]
-        print(avg_logits.shape)    # [n, 151674]
+#         logits, ranges, avg_logits = logits_by_pair(
+#             extractor, tokenizer,
+#             pixel_values, sentences,
+#             use_template=False   # or True
+#         )
+#         print(logits.shape)        # [1, seq_len, 151674]
+#         print(ranges)              # e.g. [(0,160), (161,280), ...]
+#         print(avg_logits.shape)    # [n, 151674]
 
-        features = extractor.features
+#         features = extractor.features
 
-        # Iterate over the extracted features and print their shapes.
-        for layer_name, activation in features.items():
-            avg_activation = torch.stack([
-                activation[0, s:e+1].mean(dim=0)              # mean over sequence dimension
-                for (s, e) in ranges
-            ], dim=0)  
-            print(f"Layer: {layer_name}, Feature shape: {activation.shape}, Averaged feature shape: {avg_activation.shape}, Sample: {avg_activation[0,0:5]}")
+#         # Iterate over the extracted features and print their shapes.
+#         for layer_name, activation in features.items():
+#             avg_activation = torch.stack([
+#                 activation[0, s:e+1].mean(dim=0)              # mean over sequence dimension
+#                 for (s, e) in ranges
+#             ], dim=0)  
+#             print(f"Layer: {layer_name}, Feature shape: {activation.shape}, Averaged feature shape: {avg_activation.shape}, Sample: {avg_activation[0,0:5]}")
 
 
 
@@ -1639,7 +1649,8 @@ def extract_fn(
 parts = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 'wolf', 'life', 'bourne', 'figures'] 
 movies_base = root_dir / "algonauts_2025.competitors/stimuli/movies"
 transcripts_base = root_dir / "algonauts_2025.competitors/stimuli/transcripts"
-out_dir = '/kaggle/working/'
+out_dir = root_dir / "InternVL3_14B"
+os.makedirs(out_dir, exist_ok=True)
 ignore_done = [
     "friends_s01e01a.h5",
     "friends_s01e01b.h5",

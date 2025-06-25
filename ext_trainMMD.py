@@ -117,6 +117,8 @@ class AlgonautsMultiSubjectDataset(Dataset):
         
         # The aligned features should be the same for all subjects. We use the one
         # from the first subject as the canonical version.
+        if base_aligned_features is None:
+            raise ValueError("No aligned features were created. Check if subjects list is empty or alignment failed.")
         self.aligned_features = base_aligned_features
         
         # Convert tracking lists to numpy arrays
@@ -192,6 +194,9 @@ class AlgonautsMultiSubjectDataset(Dataset):
         """
         # Get the original sample index for the subject
         original_idx = self.sample_indices[idx]
+        
+        if self.aligned_features is None:
+            raise RuntimeError("aligned_features is None. Dataset was not properly initialized.")
         
         return {
             'audio': self.aligned_features['audio'][original_idx],
@@ -602,18 +607,26 @@ if __name__ == '__main__':
     fmri_dir = root_dir / 'algonauts/algonauts_2025.competitors/fmri/'
     # movies_train = ["friends-s01"]
     # movies_train = ["movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
-    movies_train = ["friends-s01", "friends-s02", "friends-s03", "friends-s04", "friends-s05", "movie10-bourne", "movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
-    movies_val = ["friends-s06"]
+    ood = False
+    if ood:
+        movies_train = ["friends-s01", "friends-s02", "fdriends-s03", "friends-s04", "friends-s05", "movie10-bourne", "movie10-bourne", "movie10-wolf"]
+        movies_val = ["friends-s06"]
+        movies_test = ["movie10-figures", "movie10-life"]
+    else:
+        movies_train = ["friends-s01", "friends-s02", "fdriends-s03", "friends-s04", "friends-s05", "friends-s06","movie10-bourne", "movie10-bourne", "movie10-figures", "movie10-life", "movie10-wolf"]
+        # movies_val = ["friends-s06"]
     modality = "all"  #@param ["visual", "audio", "language", "all"]
 
     excluded_samples_start = 5  #@param {type:"slider", min:0, max:20, step:1}
     excluded_samples_end = 5  #@param {type:"slider", min:0, max:20, step:1}
     hrf_delay = 0  #default: 3
-    stimulus_window = 12
+    stimulus_window = 15
 
     subjects = ["1"] #@param ["1", "2", "3", "5"] {type:"raw", allow-input: true}
     train_ds = AlgonautsMultiSubjectDataset(features_dir, fmri_dir, movies=movies_train, subjects=subjects, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window)
     val_ds = AlgonautsMultiSubjectDataset(features_dir, fmri_dir, movies=movies_val, subjects=subjects, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window, mean=train_ds.mean, std=train_ds.std)
+    if ood:
+        test_ds = AlgonautsMultiSubjectDataset(features_dir, fmri_dir, movies=movies_test, subjects=subjects, excluded_samples_start=excluded_samples_start, excluded_samples_end=excluded_samples_end, hrf_delay=hrf_delay, stimulus_window=stimulus_window, mean=train_ds.mean, std=train_ds.std)
     train_loader = DataLoader(train_ds,
                             batch_size=32, 
                             num_workers=4,
@@ -632,9 +645,20 @@ if __name__ == '__main__':
                             persistent_workers=True,
                             drop_last=True
                         )
+    if ood:
+        test_loader = DataLoader(test_ds, 
+                                batch_size=32, 
+                                num_workers=4, 
+                                pin_memory=True, 
+                                prefetch_factor=2, 
+                                persistent_workers=True,
+                                drop_last=True
+                            )
 
     print(f"Train samples: {len(train_ds)}")
     print(f"Val samples: {len(val_ds)}")
+    if ood:
+        print(f"Test samples: {len(test_ds)}")
 
     for i, batch in enumerate(train_loader):
         vision, audio, lang, fmri = batch['video'], batch['audio'], batch['language'], batch['fmri']
@@ -650,15 +674,15 @@ if __name__ == '__main__':
     # run_name = "test"
     # run_name = "cos1NoCentFus_1024emb_15sw_5lr_drop1"
     # run_name = "Int20_Whis25_Ll7_drop2"
-    run_name = "multi-ftS1_StmFz_randMLP"
+    run_name = "ft_sub1_baseline"
     wandb_logger = WandbLogger(
         project=project,
         name=run_name,
-        dir=root_dir / "algonauts" /"algonauts2025/wandb_logs"
+        dir=root_dir / "algonauts2025" / "wandb_logs"
     )
     checkpoint_callback = ModelCheckpoint(
         dirpath=root_dir / 'algonauts' / f'algonauts2025/checkpoints/{project}/{run_name}',
-        filename='{step:04d}-{val_pearson_r:.4f}',
+        filename='{step:04d}-{val_pearson_r/dataloader_idx_1:.4f}',
         monitor='val_pearson_r',
         mode='max',
         save_top_k=1,
@@ -666,13 +690,13 @@ if __name__ == '__main__':
     )
 
     early_stopping = EarlyStopping(
-        monitor='val_pearson_r',
+        monitor='val_pearson_r/dataloader_idx_1',
         patience=10,
         mode='max',
         verbose=True,
         min_delta=1e-4
     )
-    epochs =40
+    epochs =10
     config = {
         'latent_dim': 1024,
         'codebook_size': 1000,
@@ -681,12 +705,12 @@ if __name__ == '__main__':
         'learning_rate': 2e-6,
         'minlr_mult': 0.01, 
         'dropout_prob': 0.4, #def 0.1
-        'encoder_dropout_prob': 0.1,
+        'encoder_dropout_prob': 0.2,
         'num_layers': 4, #def: 6
         'num_attn_heads': 8,
         'stimulus_window': stimulus_window,
         'weight_decay': 0.01,
-        'alpha': 0.6,
+        'alpha': 0.8,
         'subjects': subjects,
         'hrf_delay': hrf_delay,
         'decay_factor': 0.2,
