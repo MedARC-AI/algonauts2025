@@ -24,7 +24,7 @@ from utils import pearsonr_score, get_sha
 SUBJECTS = (1, 2, 3, 5)
 
 ROOT = Path(__file__).parent
-DATA_DIR = ROOT / "datasets/algonauts_2025.competitors"
+DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_cross_encoding.yaml"
 
 
@@ -129,8 +129,11 @@ def main(cfg: DictConfig):
 
 
 def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
-    friends_fmri = load_algonauts2025_friends_fmri(DATA_DIR, subjects=SUBJECTS)
-    movie10_fmri = load_algonauts2025_movie10_fmri(DATA_DIR, subjects=SUBJECTS)
+    data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
+    data_dir = data_dir / "algonauts_2025.competitors"
+
+    friends_fmri = load_algonauts2025_friends_fmri(data_dir, subjects=SUBJECTS)
+    movie10_fmri = load_algonauts2025_movie10_fmri(data_dir, subjects=SUBJECTS)
     all_fmri = {**friends_fmri, **movie10_fmri}
     all_episodes = list(all_fmri)
 
