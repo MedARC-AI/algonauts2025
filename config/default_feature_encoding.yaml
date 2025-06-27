@@ -5,6 +5,7 @@ model:
   encoder_kernel_size: 33
   decoder_kernel_size: 0
   encoder_causal: true
+  encoder_normalize: false
   hidden_model: null
 
 transformer:
