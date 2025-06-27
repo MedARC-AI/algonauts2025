@@ -13,14 +13,13 @@ class Rope(nn.Module):
 
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
+        assert dim % 2 == 0
         self.dim = dim
         self.theta = theta
 
         freqs = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
         # duplicate freqs for rotation pairs of channels
         freqs = torch.cat([freqs, freqs])
-        # it's an angular freq here
-        freqs = freqs * 2 * torch.pi
         self.register_buffer("freqs", freqs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -28,6 +27,9 @@ class Rope(nn.Module):
         coords = torch.arange(N, dtype=x.dtype, device=x.device)
         angle = coords[None, :, None, None] * self.freqs
         return x * angle.cos() + rotate_half(x) * angle.sin()
+
+    def extra_repr(self) -> str:
+        return f"dim={self.dim}, theta={self.theta}"
 
 
 # from xformers
@@ -117,7 +119,7 @@ class Transformer(nn.Module):
         embed_dim: int,
         num_heads: int,
         depth: int,
-        mlp_ratio: float = 4.0,
+        mlp_ratio: int | float = 4.0,
         drop_rate: float = 0.0,
         drop_path_rate: float = 0.0,
         norm_layer: Layer = nn.RMSNorm,
@@ -141,20 +143,7 @@ class Transformer(nn.Module):
             ],
         )
 
-        self.apply(_init_weights)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for blk in self.blocks:
             x = blk(x)
         return x
-
-
-def _init_weights(m: nn.Module) -> None:
-    if isinstance(m, nn.Linear):
-        nn.init.trunc_normal_(m.weight, std=0.02)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-    elif isinstance(m, (nn.LayerNorm, nn.RMSNorm)) and m.elementwise_affine:
-        nn.init.constant_(m.weight, 1.0)
-        if hasattr(m, "bias") and m.bias is not None:
-            nn.init.constant_(m.bias, 0)
