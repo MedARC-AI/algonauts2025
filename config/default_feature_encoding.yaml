@@ -4,7 +4,7 @@ model:
   embed_dim: 192
   encoder_kernel_size: 33
   decoder_kernel_size: 0
-  encoder_causal: true
+  encoder_causal: false
   encoder_positive: false
   encoder_normalize: false
   hidden_model: null
