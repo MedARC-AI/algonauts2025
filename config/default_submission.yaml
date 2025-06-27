@@ -1,0 +1,40 @@
+out_dir: output/submission
+
+model:
+  embed_dim: 192
+  encoder_kernel_size: 33
+  decoder_kernel_size: 0
+  encoder_causal: false
+  encoder_positive: false
+  encoder_normalize: false
+  hidden_model: null
+
+transformer:
+  num_heads: 3
+  depth: 6
+  mlp_ratio: 4.0
+
+conv1dnext:
+  depth: 6
+  kernel_size: 11
+  causal: false
+
+features:
+  - model: internvl3_8b_8bit
+    layer: language_model.model.layers.20.post_attention_layernorm
+
+  - model: whisper
+    layer: layers.12.fc2
+
+  - model: meta-llama__Llama-3.2-1B
+    layer: model.layers.7
+    stem: context-long
+
+test_set_name: friends-s7
+
+checkpoint: null
+
+datasets_root: null
+
+overwrite: false
+device: cuda

@@ -19,6 +19,7 @@ class Algonauts2025Dataset(IterableDataset):
         episode_list: list[str | tuple[str, int]],
         fmri_data: dict[str, np.ndarray] | None = None,
         feat_data: list[dict[str, np.ndarray]] | None = None,
+        fmri_num_samples: dict[str, int] = None,
         sample_length: int | None = 128,
         num_samples: int | None = None,
         shuffle: bool = True,
@@ -40,9 +41,13 @@ class Algonauts2025Dataset(IterableDataset):
                 for layer_feat_data in feat_data
             ]
 
+        if fmri_num_samples:
+            fmri_num_samples = {ep: fmri_num_samples[ep] for ep in episode_list}
+
         self.episode_list = episode_list
         self.fmri_data = fmri_data
         self.feat_data = feat_data
+        self.fmri_num_samples = fmri_num_samples
 
         self.sample_length = sample_length
         self.num_samples = num_samples
@@ -138,6 +143,9 @@ class Algonauts2025Dataset(IterableDataset):
             # shape (subs, length, dim)
             fmri = self.fmri_data[episode]
             fmri_length = fmri.shape[1]
+        elif self.fmri_num_samples:
+            fmri = None
+            fmri_length = self.fmri_num_samples[episode]
         else:
             fmri = fmri_length = None
 
