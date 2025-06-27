@@ -36,8 +36,8 @@ datasets:
     filter:
       seasons: [1, 2, 3, 4, 5]
       movies: ["bourne", "wolf"]
-    sample_length: 256
-    num_samples: 500
+    sample_length: 64
+    num_samples: 2000
     shuffle: True
     seed: 42
 
@@ -65,7 +65,7 @@ datasets:
     num_samples: null
     shuffle: false
 
-batch_size: 4
+batch_size: 16
 lr: 3e-4
 weight_decay: 0.1
 epochs: 10
