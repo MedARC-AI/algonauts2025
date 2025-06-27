@@ -76,8 +76,7 @@ class Conv1dNext(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor):
-        x = self.embed(x)
-        x = self.blocks(x)
-        x = self.head(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for blk in self.blocks:
+            x = blk(x)
         return x
