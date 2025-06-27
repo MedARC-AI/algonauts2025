@@ -136,27 +136,28 @@ class Algonauts2025Dataset(IterableDataset):
     ) -> tuple[torch.Tensor | None, list[torch.Tensor] | None, int]:
         if self.fmri_data:
             # shape (subs, length, dim)
-            fmri = torch.from_numpy(self.fmri_data[episode]).float()
+            fmri = self.fmri_data[episode]
             fmri_length = fmri.shape[1]
         else:
             fmri = fmri_length = None
 
         if self.feat_data:
             # each shape (length, dim)
-            feats = [torch.from_numpy(data[episode]).float() for data in self.feat_data]
-            # TODO: not all features same length. don't know why exactly.
-            feat_length = min(feat.shape[0] for feat in feats)
+            feats = [data[episode] for data in self.feat_data]
+            feat_length = max(len(feat) for feat in feats)
         else:
             feats = feat_length = None
 
         # Nb, fmri and feature length often off by 1 or 2.
         # But assuming time locked to start.
-        if fmri_length and feat_length:
-            length = min(fmri_length, feat_length)
-            fmri = fmri[:, :length]
-            feats = [feat[:length] for feat in feats]
-        else:
-            length = fmri_length or feat_length
+        length = fmri_length or feat_length
+        feats = _pad_trunc_features(feats, length)
+
+        if fmri is not None:
+            fmri = torch.from_numpy(fmri).float()
+
+        if feats is not None:
+            feats = [torch.from_numpy(feat).float() for feat in feats]
 
         return fmri, feats, length
 
@@ -165,6 +166,17 @@ class Algonauts2025Dataset(IterableDataset):
             yield from self._iter_shuffle()
         else:
             yield from self._iter_ordered()
+
+
+def _pad_trunc_features(feats: list[np.ndarray], length: int) -> list[np.ndarray]:
+    pad_trunc_feats = []
+    for feat in feats:
+        if len(feat) < length:
+            feat = np.pad(feat, [(0, length - len(feat)), (0, 0)], mode="edge")
+        else:
+            feat = feat[:length]
+        pad_trunc_feats.append(feat)
+    return pad_trunc_feats
 
 
 def load_algonauts2025_friends_fmri(
