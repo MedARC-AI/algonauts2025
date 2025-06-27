@@ -21,12 +21,14 @@ from data import (
     episode_filter,
 )
 from models import MultiSubjectConvLinearEncoder
+from transformer import Transformer
+from conv1dnext import Conv1dNext
 from utils import pearsonr_score, get_sha
 
 SUBJECTS = (1, 2, 3, 5)
 
 ROOT = Path(__file__).parent
-DATA_DIR = ROOT / "datasets"
+DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
 
 
@@ -64,8 +66,19 @@ def main(cfg: DictConfig):
     print("feat dims:", feat_dims)
 
     print("creating model")
+    hidden_model_type = cfg.model.pop("hidden_model")
+    if hidden_model_type == "transformer":
+        hidden_model_cfg = cfg.transformer
+        hidden_model = Transformer(embed_dim=cfg.model.embed_dim, **hidden_model_cfg)
+    elif hidden_model_type == "conv1dnext":
+        hidden_model_cfg = cfg.conv1dnext
+        hidden_model = Conv1dNext(embed_dim=cfg.model.embed_dim, **hidden_model_cfg)
+    else:
+        hidden_model = None
+
     model = MultiSubjectConvLinearEncoder(
         feat_dims=feat_dims,
+        hidden_model=hidden_model,
         **cfg.model,
     )
     print("model:", model)
@@ -156,11 +169,14 @@ def main(cfg: DictConfig):
 
 def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
     print("loading fmri data")
+
+    data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
+
     friends_fmri = load_algonauts2025_friends_fmri(
-        DATA_DIR / "algonauts_2025.competitors", subjects=SUBJECTS
+        data_dir / "algonauts_2025.competitors", subjects=SUBJECTS
     )
     movie10_fmri = load_algonauts2025_movie10_fmri(
-        DATA_DIR / "algonauts_2025.competitors", subjects=SUBJECTS
+        data_dir / "algonauts_2025.competitors", subjects=SUBJECTS
     )
     all_fmri = {**friends_fmri, **movie10_fmri}
     all_episodes = list(all_fmri)
@@ -211,24 +227,26 @@ def load_features(
 ) -> dict[str, np.ndarray]:
     feat_type = MODEL_FEATURE_TYPES[model]
 
+    data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
+
     if feat_type == "sharded":
         assert stem is None, "stem not used"
         friends_features = load_sharded_features(
-            DATA_DIR / "features.sharded", model=model, layer=layer, series="friends"
+            data_dir / "features.sharded", model=model, layer=layer, series="friends"
         )
         movie10_features = load_sharded_features(
-            DATA_DIR / "features.sharded", model=model, layer=layer, series="movie10"
+            data_dir / "features.sharded", model=model, layer=layer, series="movie10"
         )
     else:
         friends_features = load_merged_features(
-            DATA_DIR / "features.merged",
+            data_dir / "features.merged",
             model=model,
             layer=layer,
             series="friends",
             stem=stem,
         )
         movie10_features = load_merged_features(
-            DATA_DIR / "features.merged",
+            data_dir / "features.merged",
             model=model,
             layer=layer,
             series="movie10",
