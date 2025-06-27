@@ -41,6 +41,7 @@ class LinearConv(nn.Module):
         out_features: int,
         kernel_size: int = 11,
         causal: bool = False,
+        positive: bool = False,
     ):
         super().__init__()
         self.fc = nn.Linear(in_features, out_features)
@@ -49,6 +50,7 @@ class LinearConv(nn.Module):
             out_features,
             kernel_size=kernel_size,
             causal=causal,
+            positive=positive,
             padding="same",
             groups=out_features,
         )
@@ -69,13 +71,18 @@ class FeatEmbed(nn.Module):
         embed_dim: int = 256,
         kernel_size: int = 33,
         causal: bool = True,
+        positive: bool = False,
         normalize: bool = True,
     ):
         super().__init__()
         self.norm = nn.LayerNorm(feat_dim) if normalize else nn.Identity()
         if kernel_size > 1:
             self.embed = LinearConv(
-                feat_dim, embed_dim, kernel_size=kernel_size, causal=causal
+                feat_dim,
+                embed_dim,
+                kernel_size=kernel_size,
+                causal=causal,
+                positive=positive,
             )
         else:
             self.embed = nn.Linear(feat_dim, embed_dim)
@@ -204,6 +211,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         encoder_kernel_size: int = 33,
         decoder_kernel_size: int = 0,
         encoder_causal: bool = True,
+        encoder_positive: bool = False,
         encoder_normalize: bool = True,
     ):
         super().__init__()
@@ -216,6 +224,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
                     embed_dim,
                     kernel_size=encoder_kernel_size,
                     causal=encoder_causal,
+                    positive=encoder_positive,
                     normalize=encoder_normalize,
                 )
                 for feat_dim in feat_dims
