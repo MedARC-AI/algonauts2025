@@ -33,7 +33,7 @@ def main(cfg: DictConfig):
     print("config:", OmegaConf.to_yaml(cfg), sep="\n")
 
     out_dir = Path(cfg.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    prev_cfg = OmegaConf.load(out_dir / "config.yaml")
 
     device = torch.device(cfg.device)
     print(f"running on: {device}")
@@ -48,25 +48,30 @@ def main(cfg: DictConfig):
     print("feat dims:", feat_dims)
 
     print("creating model")
-    hidden_model_type = cfg.model.pop("hidden_model")
+    hidden_model_type = prev_cfg.model.pop("hidden_model")
     if hidden_model_type == "transformer":
-        hidden_model_cfg = cfg.transformer
-        hidden_model = Transformer(embed_dim=cfg.model.embed_dim, **hidden_model_cfg)
+        hidden_model_cfg = prev_cfg.transformer
+        hidden_model = Transformer(
+            embed_dim=prev_cfg.model.embed_dim, **hidden_model_cfg
+        )
     elif hidden_model_type == "conv1dnext":
-        hidden_model_cfg = cfg.conv1dnext
-        hidden_model = Conv1dNext(embed_dim=cfg.model.embed_dim, **hidden_model_cfg)
+        hidden_model_cfg = prev_cfg.conv1dnext
+        hidden_model = Conv1dNext(
+            embed_dim=prev_cfg.model.embed_dim, **hidden_model_cfg
+        )
     else:
         hidden_model = None
 
     model = MultiSubjectConvLinearEncoder(
         feat_dims=feat_dims,
         hidden_model=hidden_model,
-        **cfg.model,
+        **prev_cfg.model,
     )
     print("model:", model)
 
-    print("loading checkpoint:", cfg.checkpoint)
-    ckpt = torch.load(cfg.checkpoint, map_location="cpu", weights_only=False)
+    ckpt_path = out_dir / "ckpt.pt"
+    print("loading checkpoint:", ckpt_path)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     model.load_state_dict(ckpt["model"], strict=True)
     model = model.to(device)
 
