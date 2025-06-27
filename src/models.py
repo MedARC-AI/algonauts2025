@@ -2,53 +2,8 @@ from functools import partial
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 
-
-class CausalConv1d(nn.Conv1d):
-    """Conv1d layer with a causal mask, to only "attend" to past time points."""
-
-    attn_mask: torch.Tensor
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        stride: int = 1,
-        padding: str | int = 0,
-        dilation: int = 1,
-        groups: int = 1,
-        bias: bool = True,
-    ):
-        assert kernel_size % 2 == 1, "causal conv requires odd kernel size"
-        super().__init__(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-        )
-
-        attn_mask = torch.zeros(kernel_size)
-        attn_mask[: kernel_size // 2 + 1] = 1.0
-        self.weight.data.mul_(attn_mask)
-        self.register_buffer("attn_mask", attn_mask)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        weight = self.weight * self.attn_mask
-        return F.conv1d(
-            input,
-            weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups,
-        )
+from layers import Conv1d
 
 
 class ConvLinear(nn.Module):
@@ -60,11 +15,11 @@ class ConvLinear(nn.Module):
         causal: bool = False,
     ):
         super().__init__()
-        conv_layer = CausalConv1d if causal else nn.Conv1d
-        self.conv = conv_layer(
+        self.conv = Conv1d(
             in_features,
             in_features,
             kernel_size=kernel_size,
+            causal=causal,
             padding="same",
             groups=in_features,
         )
@@ -88,12 +43,12 @@ class LinearConv(nn.Module):
         causal: bool = False,
     ):
         super().__init__()
-        conv_layer = CausalConv1d if causal else nn.Conv1d
         self.fc = nn.Linear(in_features, out_features)
-        self.conv = conv_layer(
+        self.conv = Conv1d(
             out_features,
             out_features,
             kernel_size=kernel_size,
+            causal=causal,
             padding="same",
             groups=out_features,
         )
@@ -188,7 +143,8 @@ class CrossSubjectConvLinearEncoder(nn.Module):
         # todo: could learn the averaging weights
         weight = (1.0 - torch.eye(self.num_subjects)) / (self.num_subjects - 1.0)
         self.register_buffer("weight", weight)
-        self.apply(init_weights)
+
+        self.apply(_init_weights)
 
     def forward(self, input: torch.Tensor):
         # input: (N, S, L, C)
@@ -244,6 +200,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         feat_dims: tuple[int, ...] = (2048,),
         embed_dim: int = 256,
         target_dim: int = 1000,
+        hidden_model: nn.Module | None = None,
         encoder_kernel_size: int = 33,
         decoder_kernel_size: int = 0,
         encoder_causal: bool = True,
@@ -265,6 +222,8 @@ class MultiSubjectConvLinearEncoder(nn.Module):
             ]
         )
 
+        self.hidden_model = hidden_model
+
         if decoder_kernel_size > 1:
             decoder_linear = partial(ConvLinear, kernel_size=decoder_kernel_size)
         else:
@@ -274,7 +233,8 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         self.subject_decoders = nn.ModuleList(
             [decoder_linear(embed_dim, target_dim) for _ in range(num_subjects)]
         )
-        self.apply(init_weights)
+
+        self.apply(_init_weights)
 
     def forward(self, inputs: list[torch.Tensor]):
         # input: (N, L, D)
@@ -282,6 +242,10 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         embed = sum(
             feat_embed(input) for input, feat_embed in zip(inputs, self.feat_embeds)
         )
+
+        if self.hidden_model is not None:
+            embed = self.hidden_model(embed)
+
         shared_output = self.shared_decoder(embed)
         subject_output = torch.stack(
             [decoder(embed) for decoder in self.subject_decoders],
@@ -291,7 +255,12 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         return output
 
 
-def init_weights(m: nn.Module):
-    if isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Linear)):
+def _init_weights(m: nn.Module) -> None:
+    if isinstance(m, (nn.Conv1d, nn.Linear)):
         nn.init.trunc_normal_(m.weight, std=0.02)
-        nn.init.constant_(m.bias, 0)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, (nn.LayerNorm, nn.RMSNorm)) and m.elementwise_affine:
+        nn.init.constant_(m.weight, 1.0)
+        if hasattr(m, "bias") and m.bias is not None:
+            nn.init.constant_(m.bias, 0)
