@@ -182,8 +182,9 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
     all_episodes = list(all_fmri)
 
     all_features = []
-    for feat_cfg in cfg.features:
-        print(f"loading features:\n\n{OmegaConf.to_yaml(feat_cfg)}")
+    for feat_name in cfg.include_features:
+        feat_cfg = cfg.features[feat_name]
+        print(f"loading features {feat_name}:\n\n{OmegaConf.to_yaml(feat_cfg)}")
         features = load_features(**feat_cfg)
         all_features.append(features)
 
@@ -213,19 +214,16 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
     return data_loaders
 
 
-MODEL_FEATURE_TYPES = {
-    "internvl3_8b_8bit": "sharded",
-    "whisper": "sharded",
-    "meta-llama__Llama-3.2-1B": "merged",
-}
-
-
 def load_features(
     model: str,
     layer: str,
     stem: str | None = None,
 ) -> dict[str, np.ndarray]:
-    feat_type = MODEL_FEATURE_TYPES[model]
+    merged_feature_models = {
+        "meta-llama__Llama-3.2-1B",
+    }
+
+    feat_type = "merged" if model in merged_feature_models else "sharded"
 
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
 

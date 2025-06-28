@@ -20,16 +20,27 @@ conv1dnext:
   causal: false
 
 features:
-  - model: internvl3_8b_8bit
+  internvl3_8b/layers.20:
+    model: internvl3_8b_8bit
     layer: language_model.model.layers.20.post_attention_layernorm
 
-  - model: whisper
+  qwen-2-5-omni-7b/layers.20:
+    model: qwen-2-5-omni-7b
+    layer: model.layers.20.post_attention_layernorm
+
+  whisper/layers.12:
+    model: whisper
     layer: layers.12.fc2
 
-  - model: meta-llama__Llama-3.2-1B
+  llama_3.2_1b/layers.7:
+    model: meta-llama__Llama-3.2-1B
     layer: model.layers.7
     stem: context-long
 
+include_features:
+  - internvl3_8b/layers.20
+  - whisper/layers.12
+  - llama_3.2_1b/layers.7
 
 datasets:
   train:
