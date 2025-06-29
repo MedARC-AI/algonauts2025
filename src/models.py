@@ -3,7 +3,7 @@ from functools import partial
 import torch
 from torch import nn
 
-from layers import Conv1d
+from layers import DepthConv1d
 
 
 class ConvLinear(nn.Module):
@@ -15,12 +15,10 @@ class ConvLinear(nn.Module):
         causal: bool = False,
     ):
         super().__init__()
-        self.conv = Conv1d(
-            in_features,
+        self.conv = DepthConv1d(
             in_features,
             kernel_size=kernel_size,
             causal=causal,
-            padding="same",
             groups=in_features,
         )
         self.fc = nn.Linear(in_features, out_features)
@@ -45,14 +43,11 @@ class LinearConv(nn.Module):
     ):
         super().__init__()
         self.fc = nn.Linear(in_features, out_features)
-        self.conv = Conv1d(
-            out_features,
+        self.conv = DepthConv1d(
             out_features,
             kernel_size=kernel_size,
             causal=causal,
             positive=positive,
-            padding="same",
-            groups=out_features,
         )
 
     def forward(self, x: torch.Tensor):
@@ -265,7 +260,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
 
 def _init_weights(m: nn.Module) -> None:
-    if isinstance(m, (nn.Conv1d, nn.Linear)):
+    if isinstance(m, (nn.Conv1d, nn.Linear, DepthConv1d)):
         nn.init.trunc_normal_(m.weight, std=0.02)
         if m.bias is not None:
             nn.init.constant_(m.bias, 0)
