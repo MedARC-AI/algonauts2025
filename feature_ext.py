@@ -915,7 +915,7 @@ model = AutoModel.from_pretrained(
     trust_remote_code=True,
     # device_map=device_map
 ).eval()
-model = model.to("cuda:1")
+model = model.to("cuda:2")
 tokenizer = AutoTokenizer.from_pretrained(
     path,
     trust_remote_code=True,
@@ -1524,7 +1524,6 @@ def logits_by_pair(extractor, tokenizer,
     return logits, token_ranges, avg_logits
 
 print(model)
-# import sys; sys.exit()
 
 # print(model.mlp1)
 # import sys; sys.exit()
@@ -1646,54 +1645,56 @@ def extract_fn(
 
 
 # Example usage:
-parts = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 'wolf', 'life', 'bourne', 'figures'] 
+parts = ['s1'] 
+# parts = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 'wolf', 'life', 'bourne', 'figures'] 
 movies_base = root_dir / "algonauts_2025.competitors/stimuli/movies"
 transcripts_base = root_dir / "algonauts_2025.competitors/stimuli/transcripts"
 out_dir = root_dir / "InternVL3_14B"
 os.makedirs(out_dir, exist_ok=True)
-ignore_done = [
-    "friends_s01e01a.h5",
-    "friends_s01e01b.h5",
-    "friends_s01e02a.h5",
-    "friends_s01e02b.h5",
-    "friends_s01e03b.h5",
-    "friends_s01e04a.h5",
-    "friends_s01e04b.h5",
-    "friends_s01e05a.h5",
-    "friends_s01e05b.h5",
-    "friends_s01e06a.h5",
-    "friends_s01e06b.h5",
-    "friends_s01e07a.h5",
-    "friends_s01e07b.h5",
-    "friends_s01e08b.h5",
-    "friends_s01e09a.h5",
-    "friends_s01e09b.h5",
-    "friends_s01e10a.h5",
-    "friends_s01e10b.h5",
-    "friends_s01e11a.h5",
-    "friends_s01e12a.h5",
-    "friends_s01e12b.h5",
-    "friends_s01e13a.h5",
-    "friends_s01e13b.h5",
-    "friends_s01e14a.h5",
-    "friends_s01e15b.h5",
-    "friends_s01e16a.h5",
-    "friends_s01e17b.h5",
-    "friends_s01e18a.h5",
-    "friends_s01e18b.h5",
-    "friends_s01e19a.h5",
-    "friends_s01e19b.h5",
-    "friends_s01e20a.h5",
-    "friends_s01e20b.h5",
-    "friends_s01e21a.h5",
-    "friends_s01e21b.h5",
-    "friends_s01e22a.h5",
-    "friends_s01e22b.h5",
-    "friends_s01e23a.h5",
-    "friends_s01e23b.h5",
-    "friends_s01e24a.h5",
-    "friends_s01e24b.h5"
-]
+# ignore_done = [
+#     "friends_s01e01a.h5",
+#     "friends_s01e01b.h5",
+#     "friends_s01e02a.h5",
+#     "friends_s01e02b.h5",
+#     "friends_s01e03b.h5",
+#     "friends_s01e04a.h5",
+#     "friends_s01e04b.h5",
+#     "friends_s01e05a.h5",
+#     "friends_s01e05b.h5",
+#     "friends_s01e06a.h5",
+#     "friends_s01e06b.h5",
+#     "friends_s01e07a.h5",
+#     "friends_s01e07b.h5",
+#     "friends_s01e08b.h5",
+#     "friends_s01e09a.h5",
+#     "friends_s01e09b.h5",
+#     "friends_s01e10a.h5",
+#     "friends_s01e10b.h5",
+#     "friends_s01e11a.h5",
+#     "friends_s01e12a.h5",
+#     "friends_s01e12b.h5",
+#     "friends_s01e13a.h5",
+#     "friends_s01e13b.h5",
+#     "friends_s01e14a.h5",
+#     "friends_s01e15b.h5",
+#     "friends_s01e16a.h5",
+#     "friends_s01e17b.h5",
+#     "friends_s01e18a.h5",
+#     "friends_s01e18b.h5",
+#     "friends_s01e19a.h5",
+#     "friends_s01e19b.h5",
+#     "friends_s01e20a.h5",
+#     "friends_s01e20b.h5",
+#     "friends_s01e21a.h5",
+#     "friends_s01e21b.h5",
+#     "friends_s01e22a.h5",
+#     "friends_s01e22b.h5",
+#     "friends_s01e23a.h5",
+#     "friends_s01e23b.h5",
+#     "friends_s01e24a.h5",
+#     "friends_s01e24b.h5"
+# ]
+ignore_done=[]
 
 
 extract_features(parts = parts, movies_base = movies_base, transcripts_base = transcripts_base, output_dir = out_dir, extraction_fn = extract_fn, verbose = True, modality = 'all', past_context_in_seconds = 20, splits_overlap=0.5, ignore_done = ignore_done)

@@ -2,8 +2,10 @@ import math
 import json
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union
 from datetime import datetime
+import itertools
+import bisect
 
 import h5py
 import numpy as np
@@ -28,13 +30,14 @@ from utils import (
 )
 
 
-class AlgonautsDataset(Dataset):
+class AlgonautsMultiSubjectDataset(Dataset):
     """
-    PyTorch Dataset for loading multimodal features and fMRI data.
+    PyTorch Dataset for loading multimodal features and fMRI data from multiple subjects.
     
     This dataset handles:
-    - Loading visual (InternVL) and audio (Whisper) features
+    - Loading visual (InternVL), audio (Whisper), and language (Llama) features
     - Aligning stimulus features with fMRI responses considering HRF delay
+    - Managing data from multiple subjects in a single dataset
     """
     
     def __init__(
@@ -42,13 +45,14 @@ class AlgonautsDataset(Dataset):
         features_dir: Dict[str, Path],
         fmri_dir: Path,
         movies: List[str],
-        subject: int,
+        subjects: List[int],
         excluded_samples_start: int = 5,
         excluded_samples_end: int = 5,
         hrf_delay: int = 0,
         stimulus_window: int = 12,
         mean: Optional[np.ndarray] = None,
-        std: Optional[np.ndarray] = None
+        std: Optional[np.ndarray] = None,
+        stimulus_features: Optional[Dict[str, Dict[str, np.ndarray]]] = None
     ):
         """
         Initialize the dataset.
@@ -57,7 +61,7 @@ class AlgonautsDataset(Dataset):
             features_dir: Dictionary mapping modality names to their feature directories
             fmri_dir: Path to fMRI data directory
             movies: List of movie identifiers to include
-            subject: Subject ID
+            subjects: List of subject IDs to include
             excluded_samples_start: Number of initial TRs to exclude
             excluded_samples_end: Number of final TRs to exclude
             hrf_delay: Hemodynamic response function delay in TRs
@@ -68,30 +72,72 @@ class AlgonautsDataset(Dataset):
         self.features_dir = features_dir
         self.fmri_dir = fmri_dir
         self.movies = movies
-        self.subject = subject
+        self.subjects = subjects
         self.excluded_samples_start = excluded_samples_start
         self.excluded_samples_end = excluded_samples_end
         self.hrf_delay = hrf_delay
         self.stimulus_window = stimulus_window
         
+        if stimulus_features is not None:
+            # If pre-computed stimulus features are provided, use them directly
+            self.stimuli_features = stimulus_features
+        else:
         # Load stimulus features
-        print(f"Loading stimulus features for subject {subject}...")
-        self.stimuli_features = self._load_all_stimulus_features()
+            print(f"Loading stimulus features")
+            self.stimuli_features = self._load_all_stimulus_features()
         
-        # Load and align fMRI data
-        print(f"Loading fMRI data for subject {subject}...")
-        fmri_data = load_fmri(self.fmri_dir, subject)
+        # Load and align data for each subject
+        all_aligned_fmri = []
+        base_aligned_features = None
+        self.subject_ids = []
+        self.sample_indices = []
         
-        # Align features and fMRI
-        self.aligned_features, self.aligned_fmri = align_features_and_fmri_samples(
-            self.stimuli_features,
-            fmri_data,
-            self.excluded_samples_start,
-            self.excluded_samples_end,
-            self.hrf_delay,
-            self.stimulus_window,
-            self.movies
-        )
+        for idx, subject_id in enumerate(self.subjects):
+            print(f"Processing Subject {subject_id}...")
+            
+            # Load subject's fMRI data
+            fmri_data = load_fmri(self.fmri_dir, subject_id)
+
+            if idx == 0:
+                self.indexes_of_clips = self._get_indexes_of_clips(self.movies, fmri_data)
+            
+            # Align features and fMRI
+            aligned_features_sub, aligned_fmri_sub = align_features_and_fmri_samples(
+                self.stimuli_features,
+                fmri_data,
+                self.excluded_samples_start,
+                self.excluded_samples_end,
+                self.hrf_delay,
+                1, # to avoid moving to ram duplicated data we keep stimulus_window = 1
+                self.movies
+            )
+            
+            # Store aligned data
+            all_aligned_fmri.append(aligned_fmri_sub)
+            
+            # Track subject ID and sample indices
+            num_samples = aligned_fmri_sub.shape[0]
+            self.subject_ids.extend([subject_id] * num_samples)
+            self.sample_indices.extend(range(num_samples))
+            
+            if base_aligned_features is None:
+                base_aligned_features = aligned_features_sub
+            else:
+                # Concatenate features across subjects
+                for mod in aligned_features_sub:
+                    if mod not in base_aligned_features:
+                        base_aligned_features[mod] = aligned_features_sub[mod]
+                    else:
+                        base_aligned_features[mod] = np.concatenate(
+                            (base_aligned_features[mod], aligned_features_sub[mod]), axis=0
+                        )
+        
+        # Concatenate all subjects' data
+        print("Concatenating data from all subjects...")
+        self.aligned_fmri = np.concatenate(all_aligned_fmri, axis=0)
+        self.aligned_features = base_aligned_features
+        self.subject_ids = np.array(self.subject_ids)
+        self.sample_indices = np.array(self.sample_indices)
         
         # Compute or use provided normalization statistics
         if mean is None and std is None:
@@ -101,11 +147,10 @@ class AlgonautsDataset(Dataset):
             self.mean = mean
             self.std = std
         
-        # Print data statistics for debugging
-        check_fmri_stats(self.aligned_fmri, f"Subject {subject} fMRI data")
-        
-        print(f"Dataset created: {len(self)} samples")
+        print(f"Dataset created: {len(self)} samples from {len(self.subjects)} subjects")
         print(f"fMRI shape: {self.aligned_fmri.shape}")
+        for mod, features in self.aligned_features.items():
+            print(f"Shape of aligned {mod} features: {features.shape}")
     
     def _load_all_stimulus_features(self) -> Dict[str, Dict[str, np.ndarray]]:
         """Load all stimulus features for the specified movies."""
@@ -116,10 +161,6 @@ class AlgonautsDataset(Dataset):
                 self._load_friends_features(movie, features)
             else:
                 self._load_movie10_features(movie, features)
-        
-        # Remove language features since we're not using them
-        if 'language' in features:
-            del features['language']
         
         return dict(features)
     
@@ -136,20 +177,23 @@ class AlgonautsDataset(Dataset):
             episode_base = episode_file.split('_features_')[0]
             episode_key = episode_base.split('_')[1]
             
-            # Visual features
+            # Visual features - InternVL3
             visual_path = self.features_dir['visual'] / 'visual' / f"{episode_base}_features_visual.h5"
             with h5py.File(visual_path, 'r') as f:
-                features['visual'][episode_key] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+                features['visual'][episode_key] = f['language_model.model.layers.40.post_attention_layernorm'][:]
             
-            # Audio features
+            # Audio features - Whisper
             audio_path = self.features_dir['audio'] / 'audio' / f"{episode_base}_features_audio.h5"
             with h5py.File(audio_path, 'r') as f:
                 features['audio'][episode_key] = f['layers.12.fc2'][:]
-            
-            #Language features
-            lang_file = self.features_dir['language'] / 'friends' / 'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5'
-            with h5py.File(lang_file, 'r') as f:
-                features['language'][episode_key] = f[episode_key]['model.layers.7'][:]
+        
+        # # Language features - Llama
+        # lang_path = (self.features_dir['language'] / 'friends' / 
+        #             'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5')
+        # with h5py.File(lang_path, 'r') as f:
+        #     for ep in f.keys():
+        #         if ep.startswith(season):
+        #             features['language'][ep] = f[ep]['model.layers.7'][:]
     
     def _load_movie10_features(self, movie: str, features: Dict):
         """Load features for movie10 clips."""
@@ -163,31 +207,86 @@ class AlgonautsDataset(Dataset):
         for partition in partitions:
             partition_base = partition.split('_features_')[0]
             
-            # Visual features
+            # Visual features - InternVL3
             visual_path = self.features_dir['visual'] / 'visual' / f"{partition_base}_features_visual.h5"
             with h5py.File(visual_path, 'r') as f:
-                features['visual'][partition_base] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+                features['visual'][partition_base] = f['language_model.model.layers.40.post_attention_layernorm'][:]
             
-            # Audio features
+            # Audio features - Whisper
             audio_path = self.features_dir['audio'] / 'audio' / f"{partition_base}_features_audio.h5"
             with h5py.File(audio_path, 'r') as f:
                 features['audio'][partition_base] = f['layers.12.fc2'][:]
-            
-            #Language features
-            lang_file = self.features_dir['language'] / 'movie10' / 'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5'
-            with h5py.File(lang_file, 'r') as f:
-                features['language'][partition_base] = f[partition_base]['model.layers.7'][:]
+        
+        # # Language features - Llama
+        # lang_path = (self.features_dir['language'] / 'movie10' / 
+        #             'meta-llama__Llama-3.2-1B' / 'context-long_summary-0.h5')
+        # with h5py.File(lang_path, 'r') as f:
+        #     for base in f.keys():
+        #         if base.startswith(movie_name):
+        #             features['language'][base] = f[base]['model.layers.7'][:]
     
+    def _get_closest_clip_index(self, x: int) -> int:
+        """
+        Given a sorted list `start_indices` and a number `x`,
+        return (start, distance) where `start` is the greatest element ≤ x.
+        """
+        # bisect_right gives insertion point to the right of any equals
+        pos = bisect.bisect_right(self.indexes_of_clips, x) - 1
+        if pos < 0:
+            # x is before the very first start; we’ll default to the first block
+            start = self.indexes_of_clips[0]
+        else:
+            start = self.indexes_of_clips[pos]
+        return start, x - start
+
+    def _get_indexes_of_clips(self, movies: str, fmri_data: Dict[str, np.ndarray]) -> List[int]:
+        all_m_splits = []
+        for movie in movies:
+            ### Get the IDs of all movies splits for the selected movie ###
+            if movie[:7] == 'friends':
+                id = movie[8:]
+            elif movie[:7] == 'movie10':
+                id = movie[8:]
+            movie_splits = [key for key in fmri_data if id in key[:len(id)]]
+            all_m_splits.extend(movie_splits)
+        
+        size_of_clips = [len(fmri_data[key]) for key in all_m_splits]
+        indexes_of_start_clips = [0] + list(itertools.accumulate(size_of_clips[:-1]))
+        return indexes_of_start_clips
+
     def __len__(self) -> int:
         return self.aligned_fmri.shape[0]
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        # original_idx = self.sample_indices[idx]
+        
+        # start_clip, distance = self._get_closest_clip_index(original_idx)
+        # if distance >= self.stimulus_window:
+        #     c_audio = torch.from_numpy(self.aligned_features['audio'][original_idx-self.stimulus_window+1:original_idx+1]).float().squeeze()
+        #     c_video = torch.from_numpy(self.aligned_features['visual'][original_idx-self.stimulus_window+1:original_idx+1]).float().squeeze()
+    
+        # else:
+        #     c_audio = torch.from_numpy(self.aligned_features['audio'][start_clip:start_clip+self.stimulus_window]).float().squeeze()
+        #     c_video = torch.from_numpy(self.aligned_features['visual'][start_clip:start_clip+self.stimulus_window]).float().squeeze()
+
+        start_clip, distance = self._get_closest_clip_index(idx)
+        if distance >= self.stimulus_window:
+            c_audio = torch.from_numpy(self.aligned_features['audio'][idx-self.stimulus_window+1:idx+1]).float().squeeze()
+            c_video = torch.from_numpy(self.aligned_features['visual'][idx-self.stimulus_window+1:idx+1]).float().squeeze()
+    
+        else:
+            c_audio = torch.from_numpy(self.aligned_features['audio'][start_clip:start_clip+self.stimulus_window]).float().squeeze()
+            c_video = torch.from_numpy(self.aligned_features['visual'][start_clip:start_clip+self.stimulus_window]).float().squeeze()
+
+
         return {
-            'audio': torch.from_numpy(self.aligned_features['audio'][idx]).float(),
-            'video': torch.from_numpy(self.aligned_features['visual'][idx]).float(),
-            # 'language': torch.from_numpy(self.aligned_features['language'][idx]).float(),
-            'fmri': torch.from_numpy(self.aligned_fmri[idx]).float()
+            'audio': c_audio,
+            'video': c_video,
+            # 'language': torch.from_numpy(self.aligned_features['language'][original_idx]).float(),
+            'fmri': torch.from_numpy(self.aligned_fmri[idx]).float(),
+            'subject': self.subject_ids[idx]
         }
+
 
 
 class AudioVisualFusion(nn.Module):
@@ -257,46 +356,47 @@ class AudioVisualFusion(nn.Module):
         av_fused = av_fused + self.av_ffn(av_fused)
         
         return av_fused
+    
 
 
-class TemporalTransformerProcessor(nn.Module):
+class TemporalProcessor(nn.Module):
     """Temporal processing module with time-specific transformations."""
     
     def __init__(
         self,
-        latent_dim: int,
-        encoder_dropout: float,
-        num_layers: int,
+        input_dim: int,
+        hidden_dim: int,
         stimulus_window: int,
-        attn_heads: int,
-        cls_token: bool,
+        dropout: float = 0.5
     ):
         super().__init__()
-        self.latent_dim = latent_dim
-        self.encoder_dropout_prob = encoder_dropout
-        self.num_layers = num_layers
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
         self.stimulus_window = stimulus_window
-        self.num_attn_heads = attn_heads
-        self.cls = cls_token
         
         # Time-specific linear transformations
-        temp_enc = nn.TransformerEncoderLayer(
-            d_model=self.latent_dim, 
-            nhead=self.num_attn_heads,
-            dim_feedforward=self.latent_dim,
-            dropout=self.encoder_dropout_prob,
-            batch_first=True
+        self.time_specific_weights = nn.Parameter(
+            torch.Tensor(stimulus_window, input_dim, hidden_dim)
         )
-        self.temporal_encoder = nn.TransformerEncoder(
-            temp_enc,
-            num_layers=self.num_layers #Def 2
+        self.time_specific_biases = nn.Parameter(
+            torch.Tensor(stimulus_window, hidden_dim)
         )
-        self.pos_embedding = nn.Parameter(torch.zeros(1, self.stimulus_window, self.latent_dim))
-         
-        # ADD CLS token
-        if self.cls:
-            self.cls_token = nn.Parameter(torch.zeros(1, 1, self.latent_dim))
-            self.pos_embedding = nn.Parameter(torch.zeros(1, self.stimulus_window + 1, self.latent_dim))
+        
+        # Initialize parameters
+        nn.init.kaiming_uniform_(self.time_specific_weights, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.time_specific_weights[0])
+        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        nn.init.uniform_(self.time_specific_biases, -bound, bound)
+        
+        # Post-processing layers
+        self.post_process = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        # Temporal aggregation
+        self.temporal_aggregation = nn.Linear(stimulus_window, 1)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -308,91 +408,18 @@ class TemporalTransformerProcessor(nn.Module):
         Returns:
             (B, H) aggregated temporal features
         """
-
-        if self.cls:
-            b, _, _ = x.shape
-            cls_token = self.cls_token.expand(b, -1, -1)
-            x = torch.cat((cls_token, x), dim=1)
-         
-        # Adding positional embeddings
-        x += self.pos_embedding
-        logits = self.temporal_encoder(x)
-
-        out= logits[:, -1, :] #Last hidden state; try CLS
-        if self.cls:
-            out = logits[:, 0, :]
+        # Apply time-specific transformations
+        x_transformed = torch.einsum('btd,tdh->bth', x, self.time_specific_weights)
+        x_transformed = x_transformed + self.time_specific_biases
         
-        return out
-
-class AudioVisualFusion(nn.Module):
-    """Handles cross-modal attention between vision and audio."""
-    
-    def __init__(self, latent_dim: int, num_heads: int, dropout: float):
-        super().__init__()
+        # Post-process
+        x_processed = self.post_process(x_transformed)
         
-        # Cross-attention layers
-        self.vision_audio_attn = nn.MultiheadAttention(
-            embed_dim=latent_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True
-        )
+        # Aggregate across time
+        x_aggregated = x_processed.permute(0, 2, 1)
+        x_aggregated = self.temporal_aggregation(x_aggregated).squeeze(-1)
         
-        self.audio_vision_attn = nn.MultiheadAttention(
-            embed_dim=latent_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-        
-        self.av_fusion_norm = nn.LayerNorm(latent_dim)
-        
-        # Feed-forward network
-        self.av_ffn = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(latent_dim, latent_dim)
-        )
-    
-    def forward(
-        self, 
-        vision_features: torch.Tensor,
-        audio_features: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Perform audio-visual fusion.
-        
-        Args:
-            vision_features: (B, T, D) vision features
-            audio_features: (B, T, D) audio features
-            
-        Returns:
-            (B, T, D) fused features
-        """
-        # Vision-audio cross-attention
-        vision_context, _ = self.vision_audio_attn(
-            query=vision_features,
-            key=audio_features,
-            value=vision_features
-        )
-        vision_enhanced = vision_features + vision_context
-        
-        # Audio-vision cross-attention
-        audio_context, _ = self.audio_vision_attn(
-            query=audio_features,
-            key=vision_features,
-            value=audio_features
-        )
-        audio_enhanced = audio_features + audio_context
-        
-        # Combine audio-visual features
-        av_fused = self.av_fusion_norm(vision_enhanced + audio_enhanced)
-        av_fused = av_fused + self.av_ffn(av_fused)
-        
-        return av_fused
-
-
+        return x_aggregated
 
 
 class AudioVisualfMRIModel(L.LightningModule):
@@ -417,10 +444,10 @@ class AudioVisualfMRIModel(L.LightningModule):
         self.num_attn_heads = config['num_attn_heads']
         self.learning_rate = config['learning_rate']
         self.weight_decay = config['weight_decay']
-        self.num_layers = config['num_layers']
+        self.subjects = config['subjects']
         
         # Input dimensions
-        self.vision_input_dim = 3584  # InternVL features
+        self.vision_input_dim = 5120  # InternVL features
         self.audio_input_dim = 1280   # Whisper features
         self.fmri_output_dim = 1000
         
@@ -443,24 +470,26 @@ class AudioVisualfMRIModel(L.LightningModule):
             num_heads=self.num_attn_heads,
             dropout=self.encoder_dropout_prob
         )
-
+        
         # Temporal processing
-        self.temporal_processor = TemporalTransformerProcessor(
-            latent_dim=self.latent_dim,
-            encoder_dropout=self.encoder_dropout_prob,
-            num_layers=self.num_layers,
+        self.temporal_processor = TemporalProcessor(
+            input_dim=self.latent_dim,
+            hidden_dim=self.latent_dim,
             stimulus_window=self.stimulus_window,
-            attn_heads=self.num_attn_heads,
-            cls_token=False
+            dropout=0.5
         )
+        
         # Final fMRI projection
-        self.fmri_proj = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
-            nn.GELU(),
-            nn.Dropout(self.dropout_prob),
-            nn.Linear(self.latent_dim, self.fmri_output_dim)
-        )
-
+        self.fmri_proj_subjects = nn.ModuleDict()
+        for sub_id in self.subjects:
+            # Keys in ModuleDict must be strings
+            self.fmri_proj_subjects[f"sub_{sub_id}"] = self._build_projection(
+                input_dim=self.latent_dim,
+                hidden_dim=self.latent_dim,
+                output_dim=1000
+            
+            )
+                
         self.save_hyperparameters()
     
     def _build_projection(self, input_dim: int, hidden_dim: int, output_dim: int) -> nn.Module:
@@ -476,7 +505,7 @@ class AudioVisualfMRIModel(L.LightningModule):
         self,
         video: torch.Tensor,
         audio: torch.Tensor,
-        # language: torch.Tensor,
+        subject: torch.Tensor
     ) -> torch.Tensor:
         """
         Forward pass of the model.
@@ -484,7 +513,6 @@ class AudioVisualfMRIModel(L.LightningModule):
         Args:
             video: (B, T, 3584) visual features
             audio: (B, T, 1, 1280) audio features
-            lang: (B, 2048) language features
             
         Returns:
             (B, 1000) reconstructed fMRI signals
@@ -492,17 +520,31 @@ class AudioVisualfMRIModel(L.LightningModule):
         # Project inputs to common latent space
         vision_latent = self.vision_proj(video)  # (B, T, D)
         audio_latent = self.audio_proj(audio.squeeze(2))  # (B, T, D)
-        # lang_latent = self.lang_proj(language).unsqueeze(1) #(B, 1, D)
         
         # Audio-visual fusion
         fused_features = self.av_fusion(vision_latent, audio_latent)  # (B, T, D)
-        # txt_feat = self.text_cond(fused_features, lang_latent)
         
         # Temporal processing
         temporal_features = self.temporal_processor(fused_features)  # (B, D)
-        
-        # Final projection to fMRI space
-        fmri_reconstruction = self.fmri_proj(temporal_features)  # (B, 1000)
+
+        batch_size = temporal_features.size(0)
+        fmri_reconstruction = torch.zeros(
+            batch_size, self.fmri_output_dim, 
+            device=self.device, 
+            dtype=temporal_features.dtype
+        )
+
+        # Process each subject in the batch with its specific MLP
+        for sub_id in self.subjects:
+            mask = (subject == sub_id)
+            
+            if not torch.any(mask):
+                continue
+
+            sub_features = temporal_features[mask]
+            sub_mlp = self.fmri_proj_subjects[f"sub_{sub_id}"]
+            sub_pred_fmri = sub_mlp(sub_features)
+            fmri_reconstruction[mask] = sub_pred_fmri
         
         return fmri_reconstruction
     
@@ -513,10 +555,10 @@ class AudioVisualfMRIModel(L.LightningModule):
         return alpha * mse + (1 - alpha) * cosine_loss
         
     def _step_loop(self, batch, run_type):
-        video, audio, fmri = batch['video'], batch['audio'], batch['fmri']
+        video, audio, fmri, subject = batch['video'], batch['audio'], batch['fmri'], batch['subject']
         
         # Forward pass
-        pred_fmri = model(video, audio)
+        pred_fmri = model(video, audio, subject)
         
         # Compute loss
         loss = self.compute_loss(pred_fmri, fmri, alpha)
@@ -571,9 +613,8 @@ if __name__ == '__main__':
 
     # Feature directories (no language features)
     features_dir = {
-        "visual": root_dir / 'datasets' / "InternVL3_feat",
-        "audio": root_dir / 'datasets' / 'whisper_feat' / 'whisper',
-        "language": root_dir / 'datasets' / 'clane9_feat/algonauts2025/features'
+        "visual": root_dir / 'datasets' / "InternVL3_38B",
+        "audio": root_dir / 'datasets' / 'whisper_feat' / 'whisper'
     }
 
     fmri_dir = root_dir / 'datasets' / 'algonauts_2025.competitors' / 'fmri'
@@ -597,15 +638,14 @@ if __name__ == '__main__':
     excluded_samples_start = 5
     excluded_samples_end = 5
     hrf_delay = 0
-    stimulus_window = 12
-    subject = 1
+    stimulus_window = 15
+    subjects = [1, 2, 3]
 
     # Model configuration
     model_config = {
         'latent_dim': 1024,
         'vision_proj_dim': 1024,
         'audio_proj_dim': 1024,
-        'lang_proj_dim': 1024,
         'dropout_prob': 0.4,
         'encoder_dropout_prob': 0.2,
         'num_attn_heads': 8,
@@ -613,25 +653,21 @@ if __name__ == '__main__':
         'learning_rate': 1e-5,
         'weight_decay': 0.04,
         'alpha': 0.8,
-        'num_layers': 4
+        'subjects': subjects,
     }
 
     # Training configuration
     batch_size = 32
     num_workers = 4
     learning_rate = 1e-5
-    weight_decay = 0.04
     epochs = 15
     alpha = 0.8  # Weight for MSE vs cosine loss
-
-    # Create output directories
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
     # Save configuration
     config = {
         **model_config,
-        'subject': subject,
+        
         'hrf_delay': hrf_delay,
         'excluded_samples_start': excluded_samples_start,
         'excluded_samples_end': excluded_samples_end,
@@ -651,10 +687,10 @@ if __name__ == '__main__':
 
     # Create datasets
     print("Creating training dataset...")
-    train_dataset = AlgonautsDataset(
+    train_dataset = AlgonautsMultiSubjectDataset(
         features_dir, fmri_dir,
         movies=movies_train,
-        subject=subject,
+        subjects=subjects,
         excluded_samples_start=excluded_samples_start,
         excluded_samples_end=excluded_samples_end,
         hrf_delay=hrf_delay,
@@ -662,10 +698,10 @@ if __name__ == '__main__':
     )
 
     print("Creating validation dataset...")
-    val_dataset = AlgonautsDataset(
+    val_dataset = AlgonautsMultiSubjectDataset(
         features_dir, fmri_dir,
         movies=movies_val,
-        subject=subject,
+        subjects=subjects,
         excluded_samples_start=excluded_samples_start,
         excluded_samples_end=excluded_samples_end,
         hrf_delay=hrf_delay,
@@ -722,6 +758,15 @@ if __name__ == '__main__':
     print(f"  Train: {len(train_dataset)} samples")
     print(f"  Val: {len(val_dataset)} samples")
 
+    for i, batch in enumerate(val_loader):
+       video, audio, fmri, subject = batch['video'], batch['audio'], batch['fmri'], batch['subject']
+       print("vision: ", video.shape) 
+       print("audio: ", audio.shape) 
+       print("fmri: ", fmri.shape) 
+       print("subject: ", subject.shape) 
+       print(subject)
+       break
+
 
     # Initialize model
     torch.set_float32_matmul_precision('high')
@@ -729,8 +774,9 @@ if __name__ == '__main__':
     summary = ModelSummary(max_depth=3)
     # print(summary)
 
-    project="alg_avfusion"
-    exp_name = f"av_trans_LHS4l_sub{subject}_hrf{hrf_delay}_sw{stimulus_window}_{timestamp}"
+    project="alg_avMulti"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_name = f"subALL_hrf{hrf_delay}_sw{stimulus_window}_{timestamp}"
     save_dir = root_dir / 'algonauts2025' / 'checkpoints' / exp_name
     wandb_logger = WandbLogger(
         project=project,
@@ -749,10 +795,10 @@ if __name__ == '__main__':
         save_last=True,
     )
 
-    debug = False 
+    debug = False
     trainer = L.Trainer(
         accelerator='auto',
-        devices=[1],
+        devices=[2],
         max_epochs=epochs,
         # callbacks=[early_stopping],
         callbacks=[ckpt_call],

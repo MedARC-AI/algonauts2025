@@ -13,6 +13,9 @@ from sklearn.metrics import r2_score
 from typing import Dict, Tuple, Optional
 from collections import defaultdict
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from sklearn.metrics import pairwise_distances
+from umap import UMAP
 
 
 def is_interactive():
@@ -333,6 +336,20 @@ def align_features_and_fmri_samples_friends_s7(
 
     return aligned_features_friends_s7
 
+def pearsonr_score(
+    y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-7
+) -> np.ndarray:
+    assert y_true.ndim == y_pred.ndim == 2
+
+    y_true = y_true - y_true.mean(axis=0)
+    y_true = y_true / (np.linalg.norm(y_true, axis=0) + eps)
+
+    y_pred = y_pred - y_pred.mean(axis=0)
+    y_pred = y_pred / (np.linalg.norm(y_pred, axis=0) + eps)
+
+    score = (y_true * y_pred).sum(axis=0)
+    return score
+
 def calculate_metrics(
     pred: np.ndarray, 
     target: np.ndarray
@@ -361,7 +378,14 @@ def calculate_metrics(
     mae = F.l1_loss(pred_tensor, target_tensor).item()
     mse = F.mse_loss(pred_tensor, target_tensor).item()
     r2 = r2_score(target.flatten(), pred.flatten())
-    pearson_r = pearsonr(pred.flatten(), target.flatten())[0]
+    # pearson_arr = []
+    # for i in range(pred.shape[0]):
+    #     sc = pearsonr_score(y_true=target[i], y_pred=pred[i])
+    #     pearson_arr.append(sc)
+    
+    # pearson_r = sum(pearson_arr) / len(pearson_arr)
+
+    pearson_r = sum(pearsonr_score(y_true=target, y_pred=pred)) / target.shape[1]
     
     return mae, mse, r2, pearson_r, None
 
@@ -428,7 +452,7 @@ def load_friends_s7_features(features_dir: Dict[str, Path], use_language=True):
         # Visual features
         visual_path = features_dir['visual'] / 'visual' / f"{episode_base}_features_visual.h5"
         with h5py.File(visual_path, 'r') as f:
-            features['visual'][episode_key] = f['language_model.model.layers.20.post_attention_layernorm'][:]
+            features['visual'][episode_key] = f['language_model.model.layers.40.post_attention_layernorm'][:]
         
         # Audio features
         audio_path = features_dir['audio'] / 'audio' / f"{episode_base}_features_audio.h5"
@@ -445,3 +469,118 @@ def load_friends_s7_features(features_dir: Dict[str, Path], use_language=True):
                     features['language'][ep] = f[ep]['model.layers.7'][:]
     
     return dict(features)
+
+def visualize_embedding_clusters(
+    stimuli_emb: np.ndarray,
+    fmri_emb: np.ndarray,
+    title: str = "UMAP Projection of Embeddings",
+    label1: str = "Stimulus Embeddings",
+    label2: str = "fMRI Embeddings"
+) -> plt.figure:
+    """
+    Generates a UMAP visualization to show the relationship between two sets of embeddings.
+
+    Args:
+        stimuli_emb (np.ndarray): The first set of embeddings, e.g., from stimuli.
+                                 Shape: (batch_size, embedding_dim)
+        fmri_emb (np.ndarray): The second set of embeddings, e.g., from fMRI.
+                                 Shape: (batch_size, embedding_dim)
+        title (str): The main title for the plot.
+        label1 (str): Legend label for the first embedding set.
+        label2 (str): Legend label for the second embedding set.
+
+    Returns:
+        plt.figure: The matplotlib figure object containing the plot, ready for logging.
+    """
+    # Ensure inputs are NumPy arrays, detaching from graph if they are PyTorch tensors
+    if isinstance(stimuli_emb, torch.Tensor):
+        stimuli_emb = stimuli_emb.float().detach().cpu().numpy()
+    if isinstance(fmri_emb, torch.Tensor):
+        fmri_emb = fmri_emb.float().detach().cpu().numpy()
+
+    if stimuli_emb.shape[1] != fmri_emb.shape[1]:
+        raise ValueError("Embedding dimensions for both sets must be the same.")
+        
+    if stimuli_emb.shape[0] != fmri_emb.shape[0]:
+        raise ValueError("Batch sizes for both embedding sets must be the same for a meaningful comparison.")
+
+    # --- 1. Calculate Semantic Distance in High-Dimensional Space ---
+    # Calculate the centroid (mean vector) for each cluster
+    centroid1 = np.mean(stimuli_emb, axis=0, keepdims=True)
+    centroid2 = np.mean(fmri_emb, axis=0, keepdims=True)
+
+    # Compute the Euclidean distance between the two centroids
+    # This represents the "semantic gap" in the original embedding space
+    distance = pairwise_distances(centroid1, centroid2)[0][0]
+
+    # --- 2. Prepare Data for UMAP ---
+    # Combine the two sets of embeddings into one array
+    combined_embeddings = np.vstack([stimuli_emb, fmri_emb])
+
+    # Create a corresponding labels array to distinguish the two sets
+    # 0 for the first set, 1 for the second set
+    labels = np.array([0] * len(stimuli_emb) + [1] * len(fmri_emb))
+    
+    # --- 3. UMAP Dimensionality Reduction ---
+    # Initialize UMAP. `n_neighbors` and `min_dist` are key parameters to tune if needed.
+    # random_state ensures reproducibility of the UMAP layout.
+    reducer = UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
+
+    # Fit and transform the data to 2D
+    embedding_2d = reducer.fit_transform(combined_embeddings)
+
+    # Separate the 2D embeddings back into their original groups
+    stimuli_emb_2d = embedding_2d[labels == 0]
+    fmri_emb_2d = embedding_2d[labels == 1]
+
+    # --- 4. Create the Visualization ---
+    fig, ax = plt.subplots(figsize=(12, 10))
+
+    # Scatter plot for the first set of embeddings
+    ax.scatter(
+        stimuli_emb_2d[:, 0],
+        stimuli_emb_2d[:, 1],
+        c='cornflowerblue',  # A pleasant blue
+        label=label1,
+        alpha=0.7,
+        edgecolors='k',
+        linewidth=0.5
+    )
+
+    # Scatter plot for the second set of embeddings
+    ax.scatter(
+        fmri_emb_2d[:, 0],
+        fmri_emb_2d[:, 1],
+        c='tomato',  # A reddish-orange
+        label=label2,
+        alpha=0.7,
+        edgecolors='k',
+        linewidth=0.5
+    )
+
+    # --- 5. Final Touches (Title, Legend, etc.) ---
+    # The title includes the calculated semantic distance
+    fig.suptitle(
+        title,
+        fontsize=16,
+        fontweight='bold'
+    )
+    ax.set_title(
+        f"Semantic Distance (Euclidean) in Original {stimuli_emb.shape[1]}D Space: {distance:.4f}",
+        fontsize=12
+    )
+
+    ax.legend(fontsize=12, loc='best')
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_xlabel("UMAP Dimension 1", fontsize=10)
+    ax.set_ylabel("UMAP Dimension 2", fontsize=10)
+    ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+    ax.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout to make room for suptitle
+
+    # IMPORTANT: Close the plot to prevent it from displaying automatically
+    # in environments like Jupyter notebooks. The figure object is returned.
+    plt.close(fig)
+
+    return fig
