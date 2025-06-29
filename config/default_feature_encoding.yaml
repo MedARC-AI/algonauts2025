@@ -6,6 +6,7 @@ model:
   decoder_kernel_size: 0
   encoder_causal: false
   encoder_positive: false
+  encoder_blockwise: false
   encoder_normalize: false
   hidden_model: null
 

@@ -40,6 +40,7 @@ class LinearConv(nn.Module):
         kernel_size: int = 11,
         causal: bool = False,
         positive: bool = False,
+        blockwise: bool = False,
     ):
         super().__init__()
         self.fc = nn.Linear(in_features, out_features)
@@ -48,6 +49,7 @@ class LinearConv(nn.Module):
             kernel_size=kernel_size,
             causal=causal,
             positive=positive,
+            blockwise=blockwise,
         )
 
     def forward(self, x: torch.Tensor):
@@ -67,6 +69,7 @@ class FeatEmbed(nn.Module):
         kernel_size: int = 33,
         causal: bool = True,
         positive: bool = False,
+        blockwise: bool = False,
         normalize: bool = True,
     ):
         super().__init__()
@@ -78,6 +81,7 @@ class FeatEmbed(nn.Module):
                 kernel_size=kernel_size,
                 causal=causal,
                 positive=positive,
+                blockwise=blockwise,
             )
         else:
             self.embed = nn.Linear(feat_dim, embed_dim)
@@ -207,6 +211,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         decoder_kernel_size: int = 0,
         encoder_causal: bool = True,
         encoder_positive: bool = False,
+        encoder_blockwise: bool = False,
         encoder_normalize: bool = True,
     ):
         super().__init__()
@@ -220,6 +225,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
                     kernel_size=encoder_kernel_size,
                     causal=encoder_causal,
                     positive=encoder_positive,
+                    blockwise=encoder_blockwise,
                     normalize=encoder_normalize,
                 )
                 for feat_dim in feat_dims
