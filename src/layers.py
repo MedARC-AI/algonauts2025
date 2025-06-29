@@ -10,13 +10,17 @@ class DepthConv1d(nn.Module):
         causal: use a causal convolution mask.
         positive: constrain kernel to be non-negative.
         blockwise: single kernel shared across all channels.
+
+    Shape:
+        input: (*, L, C)
+        output: (*, L, C)
     """
 
     attn_mask: torch.Tensor
 
     def __init__(
         self,
-        channels: int,
+        embed_dim: int,
         kernel_size: int,
         causal: bool = False,
         positive: bool = False,
@@ -26,7 +30,7 @@ class DepthConv1d(nn.Module):
         assert not causal or kernel_size % 2 == 1, "causal conv requires odd kernel"
 
         super().__init__()
-        self.channels = channels
+        self.embed_dim = embed_dim
         self.kernel_size = kernel_size
         self.causal = causal
         self.positive = positive
@@ -35,11 +39,11 @@ class DepthConv1d(nn.Module):
         if blockwise:
             weight_shape = (1, 1, kernel_size)
         else:
-            weight_shape = (channels, 1, kernel_size)
+            weight_shape = (embed_dim, 1, kernel_size)
         self.weight = nn.Parameter(torch.empty(weight_shape))
 
         if bias:
-            self.bias = nn.Parameter(torch.empty(channels))
+            self.bias = nn.Parameter(torch.empty(embed_dim))
         else:
             self.register_parameter("bias", None)
 
@@ -48,25 +52,140 @@ class DepthConv1d(nn.Module):
             attn_mask[kernel_size // 2 + 1 :] = 0.0
         self.register_buffer("attn_mask", attn_mask)
 
-        self.reset_parameters()
+        self.init_weights()
 
-    def reset_parameters(self):
+    def init_weights(self):
         nn.init.trunc_normal_(self.weight, std=0.02)
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # input: (*, L, C)
+        # output: (*, L, C)
+        *leading_dims, L, C = input.shape
+        assert C == self.embed_dim
+
+        # (*, L, C) -> (N, C, L)
+        input = input.reshape(-1, L, C).transpose(1, 2)
+
         weight = self.weight * self.attn_mask
         if self.positive:
-            weight = weight**2
+            weight = weight.abs()
         if self.blockwise:
-            weight = weight.expand((self.channels, 1, self.kernel_size))
+            weight = weight.expand((self.embed_dim, 1, self.kernel_size))
 
-        return F.conv1d(input, weight, self.bias, padding="same", groups=self.channels)
+        output = F.conv1d(
+            input, weight, self.bias, padding="same", groups=self.embed_dim
+        )
+
+        output = output.transpose(1, 2)
+        output = output.reshape(leading_dims + [L, C])
+        return output
 
     def extra_repr(self):
         return (
-            f"{self.channels}, kernel_size={self.kernel_size}, "
+            f"{self.embed_dim}, kernel_size={self.kernel_size}, "
             f"causal={self.causal}, positive={self.positive}, "
             f"blockwise={self.blockwise}, bias={self.bias is not None}"
         )
+
+
+class LinearPoolLatent(nn.Module):
+    """Learned linear pooling over a set of features.
+
+    Shape:
+        input: (*, L, C)
+        output: (*, C)
+    """
+
+    def __init__(self, embed_dim: int, feat_size: int, positive: bool = False):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.feat_size = feat_size
+        self.positive = positive
+
+        self.weight = nn.Parameter(torch.empty(feat_size, embed_dim))
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.trunc_normal_(self.weight, std=0.02)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # input: (*, L, C)
+        # output: (*, C)
+        weight = self.weight
+        if self.positive:
+            weight = weight.abs()
+        input = torch.sum(input * weight, dim=-2)
+        return input
+
+    def extra_repr(self):
+        return f"{self.embed_dim}, feat_size={self.feat_size}, positive={self.positive}"
+
+
+class AttentionPoolLatent(nn.Module):
+    """Learned attention-based pooling over a set of features.
+
+    Copied from timm with some minor changes.
+
+    https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/attention_pool.py
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        feat_size: int,
+        num_heads: int = 8,
+        qkv_bias: bool = True,
+        drop: float = 0.0,
+    ):
+        assert embed_dim % num_heads == 0
+
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.feat_size = feat_size
+        self.num_heads = num_heads
+
+        self.pos_embed = nn.Parameter(torch.zeros(feat_size, embed_dim))
+
+        self.query = nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        self.k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_drop = nn.Dropout(drop)
+
+        self.init_weights()
+
+    def init_weights(self):
+        # todo: maybe different inits since most of our dims are small.
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        nn.init.trunc_normal_(self.query, std=0.02)
+
+    def forward(self, x: torch.Tensor):
+        *leading_dims, L, C = x.shape
+        x = x.reshape(-1, L, C)
+        N = len(x)
+        h = self.num_heads
+
+        # position embed
+        x = x + self.pos_embed.to(x.dtype)
+
+        # fixed learned query
+        # nb, timm also had a q layer, which just applied to the learned latent. this
+        # is in principle unnecessary, since the query is an unconstrained parameter.
+        # however maybe there is some magic learning dynamics reason. gonna try this
+        # simpler version first though.
+        q = self.query.expand(N, 1, C).reshape(N, 1, h, C // h).transpose(1, 2)
+
+        # attention
+        k = self.k(x).reshape(N, L, h, C // h).transpose(1, 2)
+        v = self.v(x).reshape(N, L, h, C // h).transpose(1, 2)
+
+        x = F.scaled_dot_product_attention(q, k, v)
+        x = x.transpose(1, 2).reshape(N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
+        x = x.reshape(leading_dims + [C])
+        return x

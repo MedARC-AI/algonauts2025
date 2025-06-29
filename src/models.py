@@ -1,9 +1,10 @@
 from functools import partial
+from typing import Literal
 
 import torch
 from torch import nn
 
-from layers import DepthConv1d
+from layers import DepthConv1d, LinearPoolLatent, AttentionPoolLatent
 
 
 class ConvLinear(nn.Module):
@@ -25,9 +26,7 @@ class ConvLinear(nn.Module):
 
     def forward(self, x: torch.Tensor):
         # x: (N, L, C)
-        x = x.transpose(-1, -2)
         x = self.conv(x)
-        x = x.transpose(-1, -2)
         x = self.fc(x)
         return x
 
@@ -55,39 +54,8 @@ class LinearConv(nn.Module):
     def forward(self, x: torch.Tensor):
         # x: (N, L, C)
         x = self.fc(x)
-        x = x.transpose(-1, -2)
         x = self.conv(x)
-        x = x.transpose(-1, -2)
         return x
-
-
-class FeatEmbed(nn.Module):
-    def __init__(
-        self,
-        feat_dim: int = 2048,
-        embed_dim: int = 256,
-        kernel_size: int = 33,
-        causal: bool = True,
-        positive: bool = False,
-        blockwise: bool = False,
-        normalize: bool = True,
-    ):
-        super().__init__()
-        self.norm = nn.LayerNorm(feat_dim) if normalize else nn.Identity()
-        if kernel_size > 1:
-            self.embed = LinearConv(
-                feat_dim,
-                embed_dim,
-                kernel_size=kernel_size,
-                causal=causal,
-                positive=positive,
-                blockwise=blockwise,
-            )
-        else:
-            self.embed = nn.Linear(feat_dim, embed_dim)
-
-    def forward(self, input: torch.Tensor):
-        return self.embed(self.norm(input))
 
 
 class CrossSubjectConvLinearEncoder(nn.Module):
@@ -153,7 +121,7 @@ class CrossSubjectConvLinearEncoder(nn.Module):
         self.apply(_init_weights)
 
     def forward(self, input: torch.Tensor):
-        # input: (N, S, L, C)
+        # input: (N, S, T, C)
         # subject specific encoders
 
         if self.shared_encoder is not None:
@@ -203,16 +171,17 @@ class MultiSubjectConvLinearEncoder(nn.Module):
     def __init__(
         self,
         num_subjects: int = 4,
-        feat_dims: tuple[int, ...] = (2048,),
+        feat_dims: tuple[int | tuple[int, int], ...] = (2048,),
         embed_dim: int = 256,
         target_dim: int = 1000,
         hidden_model: nn.Module | None = None,
+        global_pool: Literal["avg", "linear", "attn"] = "avg",
         encoder_kernel_size: int = 33,
         decoder_kernel_size: int = 0,
         encoder_causal: bool = True,
         encoder_positive: bool = False,
         encoder_blockwise: bool = False,
-        encoder_normalize: bool = True,
+        pool_num_heads: int = 4,
         with_shared_decoder: bool = True,
         with_subject_decoders: bool = True,
     ):
@@ -220,23 +189,41 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
         super().__init__()
         self.num_subjects = num_subjects
+        self.global_pool = global_pool
+
+        # list of (nfeats, dim)
+        feat_dims = [(1, dim) if isinstance(dim, int) else dim for dim in feat_dims]
+        total_feat_size = sum(dim[0] for dim in feat_dims)
 
         self.feat_embeds = nn.ModuleList(
             [
-                FeatEmbed(
-                    feat_dim,
+                _make_feat_embed(
+                    dim[1],
                     embed_dim,
                     kernel_size=encoder_kernel_size,
                     causal=encoder_causal,
                     positive=encoder_positive,
                     blockwise=encoder_blockwise,
-                    normalize=encoder_normalize,
                 )
-                for feat_dim in feat_dims
+                for dim in feat_dims
             ]
         )
 
-        self.hidden_model = hidden_model
+        if global_pool == "avg":
+            self.register_module("feat_pool", None)
+        elif global_pool == "linear":
+            self.feat_pool = LinearPoolLatent(embed_dim, total_feat_size)
+        elif global_pool == "attn":
+            self.feat_pool = AttentionPoolLatent(
+                embed_dim, total_feat_size, num_heads=pool_num_heads
+            )
+        else:
+            raise NotImplementedError(f"global_pool {global_pool} not implemented.")
+
+        if hidden_model is not None:
+            self.hidden_model = hidden_model
+        else:
+            self.register_module("hidden_model", None)
 
         if with_shared_decoder:
             self.shared_decoder = nn.Linear(embed_dim, target_dim)
@@ -257,12 +244,25 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
         self.apply(_init_weights)
 
-    def forward(self, inputs: list[torch.Tensor]):
-        # input: (N, L, D)
-        # output: (N, S, L, C)
-        embed = sum(
-            feat_embed(input) for input, feat_embed in zip(inputs, self.feat_embeds)
-        )
+    def forward(self, features: list[torch.Tensor]):
+        # features: list of (N, T, D_i) or (N, T, L_i, D_i)
+
+        embed_features: list[torch.Tensor] = []
+        for feat, feat_embed in zip(features, self.feat_embeds):
+            # view as (N, L_i, T, D_i)
+            feat = feat[:, None] if feat.ndim == 3 else feat.transpose(1, 2)
+
+            # project to (N, L, T, d)
+            feat = feat_embed(feat)
+            embed_features.append(feat)
+
+        if self.global_pool == "avg":
+            embed = sum(feat.mean(dim=1) for feat in embed_features)
+        else:
+            embed = torch.cat(embed_features, dim=1)
+            # (N, L, T, d) -> (N, T, L, d)
+            embed = embed.transpose(1, 2)
+            embed = self.feat_pool(embed)
 
         if self.hidden_model is not None:
             embed = self.hidden_model(embed)
@@ -283,6 +283,28 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
         output = subject_output + shared_output
         return output
+
+
+def _make_feat_embed(
+    feat_dim: int = 2048,
+    embed_dim: int = 256,
+    kernel_size: int = 33,
+    causal: bool = True,
+    positive: bool = False,
+    blockwise: bool = False,
+) -> nn.Module:
+    if kernel_size > 1:
+        embed = LinearConv(
+            feat_dim,
+            embed_dim,
+            kernel_size=kernel_size,
+            causal=causal,
+            positive=positive,
+            blockwise=blockwise,
+        )
+    else:
+        embed = nn.Linear(feat_dim, embed_dim)
+    return embed
 
 
 def _init_weights(m: nn.Module) -> None:

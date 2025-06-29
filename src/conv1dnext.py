@@ -30,11 +30,7 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor):
         # x: (N, L, C)
         input = x
-
-        x = x.transpose(-1, -2)
         x = self.dwconv(x)
-        x = x.transpose(-1, -2)
-
         x = self.norm(x)
         x = self.mlp(x)
         x = input + self.drop_path(x)
