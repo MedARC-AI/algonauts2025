@@ -4,11 +4,13 @@ model:
   embed_dim: 192
   encoder_kernel_size: 33
   decoder_kernel_size: 0
+  hidden_model: null
   encoder_causal: false
   encoder_positive: false
   encoder_blockwise: false
   encoder_normalize: false
-  hidden_model: null
+  with_shared_decoder: true
+  with_subject_decoders: true
 
 transformer:
   num_heads: 3

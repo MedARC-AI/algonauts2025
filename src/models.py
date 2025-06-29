@@ -213,7 +213,11 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         encoder_positive: bool = False,
         encoder_blockwise: bool = False,
         encoder_normalize: bool = True,
+        with_shared_decoder: bool = True,
+        with_subject_decoders: bool = True,
     ):
+        assert with_shared_decoder or with_subject_decoders
+
         super().__init__()
         self.num_subjects = num_subjects
 
@@ -234,15 +238,22 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
         self.hidden_model = hidden_model
 
+        if with_shared_decoder:
+            self.shared_decoder = nn.Linear(embed_dim, target_dim)
+        else:
+            self.register_module("shared_decoder", None)
+
         if decoder_kernel_size > 1:
             decoder_linear = partial(ConvLinear, kernel_size=decoder_kernel_size)
         else:
             decoder_linear = nn.Linear
 
-        self.shared_decoder = nn.Linear(embed_dim, target_dim)
-        self.subject_decoders = nn.ModuleList(
-            [decoder_linear(embed_dim, target_dim) for _ in range(num_subjects)]
-        )
+        if with_subject_decoders:
+            self.subject_decoders = nn.ModuleList(
+                [decoder_linear(embed_dim, target_dim) for _ in range(num_subjects)]
+            )
+        else:
+            self.register_module("subject_decoders", None)
 
         self.apply(_init_weights)
 
@@ -256,12 +267,21 @@ class MultiSubjectConvLinearEncoder(nn.Module):
         if self.hidden_model is not None:
             embed = self.hidden_model(embed)
 
-        shared_output = self.shared_decoder(embed)
-        subject_output = torch.stack(
-            [decoder(embed) for decoder in self.subject_decoders],
-            dim=1,
-        )
-        output = subject_output + shared_output[:, None]
+        if self.shared_decoder is not None:
+            shared_output = self.shared_decoder(embed)
+            shared_output = shared_output[:, None]
+        else:
+            shared_output = 0.0
+
+        if self.subject_decoders is not None:
+            subject_output = torch.stack(
+                [decoder(embed) for decoder in self.subject_decoders],
+                dim=1,
+            )
+        else:
+            subject_output = 0.0
+
+        output = subject_output + shared_output
         return output
 
 
