@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from timm.layers import DropPath, Mlp
 
-from layers import Conv1d
+from layers import DepthConv1d
 
 
 class Block(nn.Module):
@@ -17,14 +17,7 @@ class Block(nn.Module):
         super().__init__()
 
         # depthwise conv
-        self.dwconv = Conv1d(
-            dim,
-            dim,
-            kernel_size=kernel_size,
-            causal=causal,
-            padding="same",
-            groups=dim,
-        )
+        self.dwconv = DepthConv1d(dim, kernel_size=kernel_size, causal=causal)
         self.norm = nn.LayerNorm(dim, eps=1e-6)
 
         # pointwise/1x1 convs, implemented with mlp
