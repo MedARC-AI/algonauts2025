@@ -269,7 +269,7 @@ class MultiSubjectConvLinearEncoder(nn.Module):
 
         if self.shared_decoder is not None:
             shared_output = self.shared_decoder(embed)
-            shared_output = shared_output[:, None]
+            shared_output = shared_output[:, None].expand(-1, self.num_subjects, -1, -1)
         else:
             shared_output = 0.0
 
