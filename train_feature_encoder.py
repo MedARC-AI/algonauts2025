@@ -192,6 +192,11 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
         feat_cfg = cfg.features[feat_name]
         print(f"loading features {feat_name}:\n\n{OmegaConf.to_yaml(feat_cfg)}")
         features = load_features(**feat_cfg)
+
+        # pre-pool features if we are doing average pooling, to save space and time.
+        if cfg.model.global_pool == "avg":
+            features = pool_features(features)
+
         all_features.append(features)
 
     data_loaders = {}
@@ -258,6 +263,16 @@ def load_features(
         )
     features = {**friends_features, **movie10_features}
     return features
+
+
+def pool_features(features: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    pooled = {}
+    for key, feat in features.items():
+        assert feat.ndim in {2, 3}
+        if feat.ndim == 3:
+            feat = feat.mean(axis=1)
+        pooled[key] = feat
+    return pooled
 
 
 def train_one_epoch(
