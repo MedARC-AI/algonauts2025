@@ -5,10 +5,11 @@ model:
   encoder_kernel_size: 33
   decoder_kernel_size: 0
   hidden_model: null
+  global_pool: avg
   encoder_causal: false
   encoder_positive: false
   encoder_blockwise: false
-  encoder_normalize: false
+  pool_num_heads: 3
   with_shared_decoder: true
   with_subject_decoders: true
 
@@ -39,6 +40,26 @@ features:
     model: meta-llama__Llama-3.2-1B
     layer: model.layers.7
     stem: context-long
+
+  dinov2/blocks.5:
+    model: vit_giant_patch14_reg4_dinov2.lvd142m
+    layer: blocks.5
+
+  dinov2/blocks.15:
+    model: vit_giant_patch14_reg4_dinov2.lvd142m
+    layer: blocks.15
+
+  dinov2/blocks.25:
+    model: vit_giant_patch14_reg4_dinov2.lvd142m
+    layer: blocks.25
+
+  dinov2/blocks.35:
+    model: vit_giant_patch14_reg4_dinov2.lvd142m
+    layer: blocks.35
+
+  dinov2/embedding:
+    model: vit_giant_patch14_reg4_dinov2.lvd142m
+    layer: embedding
 
 include_features:
   - internvl3_8b/layers.20

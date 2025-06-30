@@ -62,7 +62,13 @@ def main(cfg: DictConfig):
     val_loaders.pop("train")
 
     batch = next(iter(train_loader))
-    feat_dims = [feat.shape[-1] for feat in batch["features"]]
+
+    feat_dims = []
+    for feat in batch["features"]:
+        # features can be (N, T, C) or (N, T, L, C)
+        dim = feat.shape[2] if feat.ndim == 3 else tuple(feat.shape[2:])
+        feat_dims.append(dim)
+
     print("feat dims:", feat_dims)
 
     print("creating model")

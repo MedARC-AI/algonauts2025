@@ -180,7 +180,8 @@ def _pad_trunc_features(feats: list[np.ndarray], length: int) -> list[np.ndarray
     pad_trunc_feats = []
     for feat in feats:
         if len(feat) < length:
-            feat = np.pad(feat, [(0, length - len(feat)), (0, 0)], mode="edge")
+            padding = [(0, length - len(feat))] + (feat.ndim - 1) * [(0, 0)]
+            feat = np.pad(feat, padding, mode="edge")
         else:
             feat = feat[:length]
         pad_trunc_feats.append(feat)
@@ -338,6 +339,9 @@ def load_sharded_features(
     """Load features from h5 shards.
 
     This is what most people on the team make.
+
+    todo: maybe take a list of features and then concatenate, to share projection across
+    layers.
     """
     paths = sorted((Path(root) / model / series).rglob("*.h5"))
 
