@@ -11,6 +11,7 @@ from data import (
     Algonauts2025Dataset,
     load_merged_features,
     load_sharded_features,
+    load_developer_features,
     episode_filter,
 )
 from models import MultiSubjectConvLinearEncoder
@@ -34,6 +35,7 @@ def main(cfg: DictConfig):
 
     out_dir = Path(cfg.out_dir)
     prev_cfg = OmegaConf.load(out_dir / "config.yaml")
+    prev_cfg['test_set_name'] = cfg['test_set_name']
 
     device = torch.device(cfg.device)
     print(f"running on: {device}")
@@ -41,10 +43,15 @@ def main(cfg: DictConfig):
     print("creating data loader")
 
     fmri_num_samples = load_fmri_num_samples(cfg)
-    test_loader = make_data_loader(cfg, fmri_num_samples)
+    test_loader = make_data_loader(prev_cfg, fmri_num_samples)
 
     example_batch = next(iter(test_loader))
-    feat_dims = [feat.shape[-1] for feat in example_batch["features"]]
+    # feat_dims = [feat.shape[-1] for feat in example_batch["features"]]
+    feat_dims = [] # This is how it is done in the train_feature_encoder.py, let's see if this works
+    for feat in example_batch["features"]:
+        # features can be (N, T, C) or (N, T, L, C)
+        dim = feat.shape[2] if feat.ndim == 3 else tuple(feat.shape[2:])
+        feat_dims.append(dim)
     print("feat dims:", feat_dims)
 
     print("creating model")
@@ -96,16 +103,24 @@ def make_data_loader(
     cfg: DictConfig,
     fmri_num_samples: dict[str, int],
 ) -> DataLoader:
+    # all_features = []
+    # for feat_cfg in cfg.features:
+    #     print(f"loading features:\n\n{OmegaConf.to_yaml(feat_cfg)}")
+    #     features = load_features(cfg, **feat_cfg)
+    #     all_features.append(features)
     all_features = []
-    for feat_cfg in cfg.features:
-        print(f"loading features:\n\n{OmegaConf.to_yaml(feat_cfg)}")
-        features = load_features(cfg, **feat_cfg)
+    for feat_name in cfg.include_features:
+        feat_cfg = cfg.features[feat_name]
+        print(f"loading features {feat_name}:\n\n{OmegaConf.to_yaml(feat_cfg)}")
+        features = load_features(cfg,**feat_cfg)
         all_features.append(features)
 
     all_episodes = list(all_features[0])
 
     if cfg.test_set_name == "friends-s7":
         filter_fn = episode_filter(seasons=[7], movies=[])
+    elif cfg.test_set_name == "ood":
+        filter_fn = episode_filter(seasons=[],movies=["chaplin","mononoke","passepartout","planetearth","pulpfiction","wot"])
     else:
         raise ValueError(f"test set {cfg.test_set_name} not implemented.")
 
@@ -133,7 +148,17 @@ def make_data_loader(
 MODEL_FEATURE_TYPES = {
     "internvl3_8b_8bit": "sharded",
     "whisper": "sharded",
+    "internvl3_14b": "sharded",
+    "qwen-2-5-omni-7b":"sharded",
+    "qwen2-5_3B":"sharded",
+    "dinov2":"sharded",
+    "vjepa2_avg_feat":"sharded",
+    "dinov2-giant":"sharded",
+    "modernBert":"sharded",
     "meta-llama__Llama-3.2-1B": "merged",
+    "MFCC":"developer",
+    "slow_r50":"developer",
+    "bert-base-uncased":"developer"
 }
 
 
@@ -155,6 +180,19 @@ def load_features(
         movie10_features = load_sharded_features(
             data_dir / "features.sharded", model=model, layer=layer, series="movie10"
         )
+        ood_features = load_sharded_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="ood"
+        )
+    elif feat_type == "developer":
+        friends_features = load_developer_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="friends"
+        )
+        movie10_features = load_developer_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="movie10"
+        )
+        ood_features = load_developer_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="ood"
+        )
     else:
         friends_features = load_merged_features(
             data_dir / "features.merged",
@@ -170,7 +208,14 @@ def load_features(
             series="movie10",
             stem=stem,
         )
-    features = {**friends_features, **movie10_features}
+        ood_features = load_merged_features(
+            data_dir / "features.merged",
+            model=model,
+            layer=layer,
+            series="ood",
+            stem=stem,
+        )
+    features = {**friends_features, **movie10_features, **ood_features}
     return features
 
 

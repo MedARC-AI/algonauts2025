@@ -12,7 +12,6 @@ from torch.utils.data import IterableDataset
 
 SUBJECTS = (1, 2, 3, 5)
 
-
 class Algonauts2025Dataset(IterableDataset):
     def __init__(
         self,
@@ -323,13 +322,19 @@ def load_algonauts2025_movie10_fmri(
 def parse_movie10_run(run: str) -> tuple[str, int]:
     """
     bourne01 -> (bourne, 1)
+    chaplin1 -> (chaplin, 1)
     """
-    match = re.match(r"([a-z]+)([0-9]+)", run)
-    if match is None:
-        raise ValueError(f"Invalid movie run {run}")
+    movie = "empty"
+    part = 0
 
-    movie = match.group(1)
-    part = int(match.group(2))
+    match = re.fullmatch(r"([a-zA-Z]+)(\d+)", run)
+    # match = re.match(r"([a-z]+)([0-9]+)", run)
+    if match is None:
+        print(f"Invalid movie run '{run}', returning empty list.")
+        # raise ValueError(f"Invalid movie run {run}")
+    else:
+        movie = match.group(1)
+        part = int(match.group(2))
     return movie, part
 
 
@@ -347,7 +352,9 @@ def load_sharded_features(
 
     features = {}
     for path in paths:
-        episode = path.stem.split("_")[-1]  # friends_s01e01a, bourne01
+        stem_parts = path.stem.replace("-","_").split("_")
+        episode = stem_parts[1] if len(stem_parts) > 1 else stem_parts[0] # friends_s01e01a, bourne01
+        # episode = path.stem.split("_")[-1]  # friends_s01e01a, bourne01, task-chaplin1_video
         with h5py.File(path) as f:
             features[episode] = f[layer][:].squeeze()
     return features
@@ -373,6 +380,25 @@ def load_merged_features(
         features = {k: f[k][layer][:] for k in f}
     return features
 
+def load_developer_features(
+    root: str | Path,
+    model: str,
+    layer: str,
+    series: str = "friends"
+) -> dict[str, np.ndarray]:
+    all_h5_files = sorted((Path(root) / model).rglob("*.h5"))
+    if series == "friends":
+        keywords = {"friends"}
+    elif series == "movie10":
+        keywords = {"figures", "wolf", "life", "bourne"}
+    paths = [p for p in all_h5_files if any(p.name.startswith(kw) for kw in keywords)]
+    features = {}
+    for path in paths:
+        episode = path.stem.split("_")[-3]  # s01e01a, bourne01    
+        with h5py.File(path) as f:
+            tmp = f[f'{episode}/{layer}'][:].squeeze()
+            features[episode] = tmp.reshape(tmp.shape[0],-1)
+    return features
 
 def episode_filter(
     seasons: list[str] | None = None,
@@ -393,7 +419,6 @@ def episode_filter(
             season, _, _ = parse_friends_run(episode)
             if season not in seasons:
                 return False
-
         else:
             movie, _ = parse_movie10_run(episode)
             if movie not in movies:

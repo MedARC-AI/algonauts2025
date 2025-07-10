@@ -27,18 +27,43 @@ features:
   internvl3_8b/layers.20:
     model: internvl3_8b_8bit
     layer: language_model.model.layers.20.post_attention_layernorm
+  
+  internvl3_8b/layers.10:
+    model: internvl3_8b_8bit
+    layer: language_model.model.layers.10.post_attention_layernorm
+
+  internvl3_14b/layer.30:
+    model: internVL3_14B
+    layer: language_model.model.layers.30.post_attention_layernorm
 
   qwen-2-5-omni-7b/layers.20:
     model: qwen-2-5-omni-7b
+    layer: model.layers.20.post_attention_layernorm
+  
+  qwen-2-5-omni-3b/layers.20:
+    model: qwen2-5_3B
     layer: model.layers.20.post_attention_layernorm
 
   whisper/layers.12:
     model: whisper
     layer: layers.12.fc2
+   
+  whisper/layers.31:
+    model: whisper
+    layer: layers.31.fc2
 
+  MFCC/audio:
+    model: MFCC
+    layer: audio
+    
   llama_3.2_1b/layers.7:
     model: meta-llama__Llama-3.2-1B
     layer: model.layers.7
+    stem: context-long
+  
+  llama_3.2_1b/layers.15:
+    model: meta-llama__Llama-3.2-1B
+    layer: model.layers.15
     stem: context-long
 
   dinov2/blocks.5:
@@ -60,6 +85,14 @@ features:
   dinov2/embedding:
     model: vit_giant_patch14_reg4_dinov2.lvd142m
     layer: embedding
+  
+  dinov2-giant/pooler_output:
+    model: dinov2-giant
+    layer: pooler_output
+    
+  vjepa2/encoder.layernorm_avg:
+    model: vjepa2_avg_feat
+    layer: encoder.layernorm_avg
 
 include_features:
   - internvl3_8b/layers.20
