@@ -21,9 +21,9 @@ now=$(TZ=America/New_York date '+%y%m%d%H%M')
 # Model 2
 uv run python submit_feature_encoder.py \
     --overrides \
-    out_dir=output/feature_encoding_remove_llama_add_qwen3b_vjepa2_enc-kernel-45_2507092108 \
+    out_dir=output/feature_encoding_remove_llama_remove_whisper_add_qwen3b_vjepa2_enc-kernel-45_2507092301 \
     datasets_root=./datasets/ \
-    test_set_name=ood-nochaplin
+    test_set_name=ood
 
 
 # Model 3
