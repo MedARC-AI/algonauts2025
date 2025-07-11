@@ -140,7 +140,7 @@ def main(cfg: DictConfig):
                 ds_name=name,
             )
             val_accs[name] = acc
-            if ii == 0:
+            if name == cfg.val_set_name:
                 val_acc = acc
             val_metrics[name] = metrics
 

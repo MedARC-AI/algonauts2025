@@ -37,9 +37,16 @@ features:
     layer: layers.12.fc2
 
   llama_3.2_1b/layers.7:
-    model: meta-llama__Llama-3.2-1B
+    model: Llama-3.2-1B
     layer: model.layers.7
-    stem: context-long
+
+  llama_3.2_3b/layers.5:
+    model: Llama-3.2-3B
+    layer: model.layers.5
+
+  llama_3.2_3b/layers.15:
+    model: Llama-3.2-3B
+    layer: model.layers.15
 
   dinov2/blocks.5:
     model: vit_giant_patch14_reg4_dinov2.lvd142m
@@ -60,6 +67,10 @@ features:
   dinov2/embedding:
     model: vit_giant_patch14_reg4_dinov2.lvd142m
     layer: embedding
+
+  vjepa2/layernorm:
+    model: vjepa2_avg_feat
+    layer: encoder.layernorm_avg
 
 include_features:
   - internvl3_8b/layers.20
@@ -99,6 +110,8 @@ datasets:
     sample_length: null
     num_samples: null
     shuffle: false
+
+val_set_name: val_s6
 
 batch_size: 16
 lr: 3e-4

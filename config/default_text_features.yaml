@@ -10,4 +10,4 @@ datasets_root: /data
 
 overwrite: true
 seed: 42
-device: cuda:1
+device: cuda
