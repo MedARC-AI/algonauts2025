@@ -118,8 +118,19 @@ lr: 3e-4
 weight_decay: 0.1
 epochs: 10
 
-checkpoint: null
+cross_model:
+  embed_dim: 192
+  encoder_kernel_size: 7
+  decoder_kernel_size: 0
+  with_shared_encoder: True
+  with_shared_decoder: True
+  with_subject_encoders: True
+  with_subject_decoders: True
+
+cross_checkpoint: null
+cross_init_decoder: false
 freeze_decoder: false
+cross_distill_alpha: 0.0
 
 datasets_root: null
 
