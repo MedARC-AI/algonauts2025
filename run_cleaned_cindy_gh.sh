@@ -6,24 +6,24 @@ export CUDA_VISIBLE_DEVICES=7
 now=$(TZ=America/New_York date '+%y%m%d%H%M')
 
 # Model 1
-# uv run python train_feature_encoder.py \
-#     --overrides \
-#     out_dir=output/feature_encoding_remove_llama_remove_whisper_add_qwen3b_vjepa2_enc-kernel-45_${now} \
-#     "include_features=[qwen-2-5-omni-3b/layers.20,internvl3_8b/layers.20, vjepa2/encoder.layernorm_avg]" \
-#     model.encoder_kernel_size=45\
-#     datasets_root=./datasets/ #/dev/shm/algonauts2025
+uv run python train_feature_encoder.py \
+    --overrides \
+    out_dir=output/feature_encoding_add_emonet_qwen3b_vjepa2_enc-kernel-45_${now} \
+    "include_features=[llama_3.2_1b/layers.7,emonet/visual,whisper/layers.12,qwen-2-5-omni-3b/layers.20,internvl3_8b/layers.20, vjepa2/encoder.layernorm_avg]" \
+    model.encoder_kernel_size=45\
+    datasets_root=./datasets/ #/dev/shm/algonauts2025
 
 # uv run python submit_feature_encoder.py \
 #     --overrides \
-#     out_dir=output/feature_encoding_remove_llama_remove_whisper_add_qwen3b_vjepa2_enc-kernel-45_${now} \
+#     out_dir=output/feature_encoding_remove_llama_remove_whisper_add_MFCC_qwen3b_vjepa2_enc-kernel-45_${now} \
 #     datasets_root=./datasets/
 
-# Model 2
-uv run python submit_feature_encoder.py \
-    --overrides \
-    out_dir=output/feature_encoding_remove_llama_remove_whisper_add_qwen3b_vjepa2_enc-kernel-45_2507092301 \
-    datasets_root=./datasets/ \
-    test_set_name=ood
+# # Model 2
+# uv run python submit_feature_encoder.py \
+#     --overrides \
+#     out_dir=output/feature_encoding_remove_llama_remove_whisper_add_qwen3b_vjepa2_enc-kernel-45_2507092301 \
+#     datasets_root=./datasets/ \
+#     test_set_name=ood
 
 
 # Model 3

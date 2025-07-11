@@ -55,7 +55,20 @@ features:
   MFCC/audio:
     model: MFCC
     layer: audio
-    
+  
+  bert-base-uncased/language_pooler_output:
+    model: bert-base-uncased
+    layer: language_pooler_output
+  
+  bert-base-uncased/language_last_hidden_state:
+    model: bert-base-uncased
+    layer: language_last_hidden_state
+  
+  emonet/visual:
+    model: emonet
+    layer: visual
+    stem: _20perTR
+
   llama_3.2_1b/layers.7:
     model: meta-llama__Llama-3.2-1B
     layer: model.layers.7

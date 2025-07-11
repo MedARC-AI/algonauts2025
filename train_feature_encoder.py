@@ -18,6 +18,8 @@ from data import (
     load_algonauts2025_movie10_fmri,
     load_merged_features,
     load_sharded_features,
+    load_developer_features,
+    load_onefile_features,
     episode_filter,
 )
 from models import MultiSubjectConvLinearEncoder
@@ -31,6 +33,22 @@ ROOT = Path(__file__).parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
 
+MODEL_FEATURE_TYPES = {
+    "internvl3_8b_8bit": "sharded",
+    "whisper": "sharded",
+    "internvl3_14b": "sharded",
+    "qwen-2-5-omni-7b":"sharded",
+    "qwen2-5_3B":"sharded",
+    "dinov2":"sharded",
+    "vjepa2_avg_feat":"sharded",
+    "dinov2-giant":"sharded",
+    "modernBert":"sharded",
+    "meta-llama__Llama-3.2-1B": "merged",
+    "MFCC":"developer",
+    "slow_r50":"developer",
+    "bert-base-uncased":"developer",
+    "emonet":"onefile"
+}
 
 def main(cfg: DictConfig):
     print("training multi-subject fmri encoder")
@@ -225,11 +243,7 @@ def load_features(
     layer: str,
     stem: str | None = None,
 ) -> dict[str, np.ndarray]:
-    merged_feature_models = {
-        "meta-llama__Llama-3.2-1B",
-    }
-
-    feat_type = "merged" if model in merged_feature_models else "sharded"
+    feat_type = MODEL_FEATURE_TYPES[model]
 
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
 
@@ -240,6 +254,21 @@ def load_features(
         )
         movie10_features = load_sharded_features(
             data_dir / "features.sharded", model=model, layer=layer, series="movie10"
+        )
+    elif feat_type == "developer":
+        assert stem is None, "stem not used"
+        friends_features = load_developer_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="friends"
+        )
+        movie10_features = load_developer_features(
+            data_dir / "features.sharded", model=model, layer=layer, series="movie10"
+        )
+    elif feat_type == "onefile":
+        features = load_onefile_features(
+            data_dir / "features.onefile",
+            model=model,
+            layer=layer,
+            stem=stem,
         )
     else:
         friends_features = load_merged_features(
@@ -256,7 +285,8 @@ def load_features(
             series="movie10",
             stem=stem,
         )
-    features = {**friends_features, **movie10_features}
+    if feat_type != "onefile":
+        features = {**friends_features, **movie10_features}
     return features
 
 

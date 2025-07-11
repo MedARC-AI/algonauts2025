@@ -380,17 +380,35 @@ def load_merged_features(
         features = {k: f[k][layer][:] for k in f}
     return features
 
+def load_onefile_features(
+    root: str | Path,
+    model: str,
+    layer: str,
+    stem: str | None = None,
+) -> dict[str, np.ndarray]:
+    """Load features from all features in one h5 file.
+    """
+    if stem is None:
+        path = Path(root) /f"{model}" / f"{model}.npy"
+    else:
+        path = Path(root) /f"{model}" /f"{model}{stem}.npy"
+
+    features = np.load(path, allow_pickle=True).item()
+    return features
+
 def load_developer_features(
     root: str | Path,
     model: str,
     layer: str,
-    series: str = "friends"
+series: str = "friends"
 ) -> dict[str, np.ndarray]:
     all_h5_files = sorted((Path(root) / model).rglob("*.h5"))
     if series == "friends":
         keywords = {"friends"}
     elif series == "movie10":
         keywords = {"figures", "wolf", "life", "bourne"}
+    else:
+        keywords = {"chaplin","mononoke","passepartout","planetearth","pulpfiction","wot"}
     paths = [p for p in all_h5_files if any(p.name.startswith(kw) for kw in keywords)]
     features = {}
     for path in paths:

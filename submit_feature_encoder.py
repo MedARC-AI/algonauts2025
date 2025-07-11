@@ -158,7 +158,8 @@ MODEL_FEATURE_TYPES = {
     "meta-llama__Llama-3.2-1B": "merged",
     "MFCC":"developer",
     "slow_r50":"developer",
-    "bert-base-uncased":"developer"
+    "bert-base-uncased":"developer",
+    "emonet":"onefile"
 }
 
 
