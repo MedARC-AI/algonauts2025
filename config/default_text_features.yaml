@@ -1,0 +1,13 @@
+out_dir: datasets/features.sharded
+
+model: meta-llama/Llama-3.2-1B
+layers:
+  - model.layers.7
+  - model.layers.11
+  - model.layers.15
+
+datasets_root: /data
+
+overwrite: true
+seed: 42
+device: cuda:1
