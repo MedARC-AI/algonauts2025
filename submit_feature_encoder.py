@@ -149,6 +149,7 @@ MODEL_FEATURE_TYPES = {
     "internvl3_8b_8bit": "sharded",
     "whisper": "sharded",
     "internvl3_14b": "sharded",
+    "InternVL3_8B_multiframe":"sharded",
     "qwen-2-5-omni-7b":"sharded",
     "qwen2-5_3B":"sharded",
     "dinov2":"sharded",

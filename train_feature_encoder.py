@@ -43,6 +43,7 @@ MODEL_FEATURE_TYPES = {
     "vjepa2_avg_feat":"sharded",
     "dinov2-giant":"sharded",
     "modernBert":"sharded",
+    "InternVL3_8B_multiframe":"sharded",
     "meta-llama__Llama-3.2-1B": "merged",
     "MFCC":"developer",
     "slow_r50":"developer",

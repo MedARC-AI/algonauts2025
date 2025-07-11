@@ -35,7 +35,11 @@ features:
   internvl3_14b/layer.30:
     model: internVL3_14B
     layer: language_model.model.layers.30.post_attention_layernorm
-
+  
+  internvl3_8b_multiframe/layer.20:
+    model: InternVL3_8B_multiframe
+    layer: language_model.model.layers.20.post_attention_layernorm
+    
   qwen-2-5-omni-7b/layers.20:
     model: qwen-2-5-omni-7b
     layer: model.layers.20.post_attention_layernorm
