@@ -44,10 +44,14 @@ MODEL_FEATURE_TYPES = {
     "dinov2-giant":"sharded",
     "modernBert":"sharded",
     "InternVL3_8B_multiframe":"sharded",
+    "videomae2":"sharded",
+    "Llama-3.2-1B": "sharded",
+    "Llama-3.2-3B": "sharded",
     "meta-llama__Llama-3.2-1B": "merged",
     "MFCC":"developer",
     "slow_r50":"developer",
     "bert-base-uncased":"developer",
+    "InternVL3_14B":"developer", # it looks like Mihir's formatted in the way that it could be loaded by the function to load developer features
     "emonet":"onefile"
 }
 
@@ -187,7 +191,9 @@ def main(cfg: DictConfig):
         )
 
     with (out_dir / "acc.json").open("w") as f:
+        print(json.dumps(best_epoch), file=f)
         print(json.dumps(best_accs), file=f)
+
 
     print("done! best accuracy:\n", json.dumps(best_accs))
 

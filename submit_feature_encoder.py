@@ -156,10 +156,14 @@ MODEL_FEATURE_TYPES = {
     "vjepa2_avg_feat":"sharded",
     "dinov2-giant":"sharded",
     "modernBert":"sharded",
+    "videomae2":"sharded",
+    "Llama-3.2-1B": "sharded",
+    "Llama-3.2-3B": "sharded",
     "meta-llama__Llama-3.2-1B": "merged",
     "MFCC":"developer",
     "slow_r50":"developer",
     "bert-base-uncased":"developer",
+    "InternVL3_14B":"sharded", # Note that this is a dirty trick to change it because it is different from training...why Mihir Orz
     "emonet":"onefile"
 }
 

@@ -32,8 +32,8 @@ features:
     model: internvl3_8b_8bit
     layer: language_model.model.layers.10.post_attention_layernorm
 
-  internvl3_14b/layer.30:
-    model: internVL3_14B
+  internvl3_14b/layers.30:
+    model: InternVL3_14B
     layer: language_model.model.layers.30.post_attention_layernorm
   
   internvl3_8b_multiframe/layer.20:
@@ -55,23 +55,59 @@ features:
   whisper/layers.31:
     model: whisper
     layer: layers.31.fc2
+  
+  videomae2/model.blocks.25.mlp.fc2gp:
+    model: videomae2
+    layer: model.blocks.25.mlp.fc2gp
+  
+  videomae2/model.blocks.25.mlp.fc2avg:
+    model: videomae2
+    layer: model.blocks.25.mlp.fc2avg
 
   MFCC/audio:
     model: MFCC
     layer: audio
   
-  bert-base-uncased/language_pooler_output:
+  bert-base-uncased/language_pooler_output: # Not sure why this is not working
     model: bert-base-uncased
     layer: language_pooler_output
   
-  bert-base-uncased/language_last_hidden_state:
+  bert-base-uncased/language_last_hidden_state: # Not sure why this is not working
     model: bert-base-uncased
     layer: language_last_hidden_state
   
+  modernBert/mean_pooling_output:
+    model: modernBert
+    layer: mean_pooling_output
+
   emonet/visual:
     model: emonet
     layer: visual
     stem: _20perTR
+
+  llama_3.2_1B/layers.7:
+    model: Llama-3.2-1B
+    layer: model.layers.7
+
+  llama_3.2_3B/layers.7:
+    model: Llama-3.2-3B
+    layer: model.layers.7
+
+  llama_3.2_3B/layers.5:
+    model: Llama-3.2-3B
+    layer: model.layers.5
+
+  llama_3.2_3B/layers.15:
+    model: Llama-3.2-3B
+    layer: model.layers.15
+  
+  llama_3.2_3B/layers.19:
+    model: Llama-3.2-3B
+    layer: model.layers.19
+  
+  llama_3.2_3B/layers.11:
+    model: Llama-3.2-3B
+    layer: model.layers.11
 
   llama_3.2_1b/layers.7:
     model: meta-llama__Llama-3.2-1B
@@ -119,28 +155,28 @@ include_features:
 datasets:
   train:
     filter:
-      seasons: [1, 2, 3, 4, 5]
-      movies: ["bourne", "wolf"]
+      seasons: [1, 2, 3, 4, 5, 6]
+      movies: ["bourne", "wolf","figures"]
     sample_length: 64
     num_samples: 2000
     shuffle: True
     seed: 42
 
-  val_s6:
-    filter:
-      seasons: [6]
-      movies: []
-    sample_length: null
-    num_samples: null
-    shuffle: false
+  # val_s6:
+  #   filter:
+  #     seasons: [6]
+  #     movies: []
+  #   sample_length: null
+  #   num_samples: null
+  #   shuffle: false
 
-  val_figures:
-    filter:
-      seasons: []
-      movies: ["figures"]
-    sample_length: null
-    num_samples: null
-    shuffle: false
+  # val_figures:
+  #   filter:
+  #     seasons: []
+  #     movies: ["figures"]
+  #   sample_length: null
+  #   num_samples: null
+  #   shuffle: false
 
   val_life:
     filter:

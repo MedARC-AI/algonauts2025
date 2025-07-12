@@ -9,10 +9,14 @@ features:
     model: internvl3_8b_8bit
     layer: language_model.model.layers.10.post_attention_layernorm
 
-  internvl3_14b/layer.30:
-    model: internVL3_14B
+  internvl3_14b/layers.30:
+    model: InternVL3_14B
     layer: language_model.model.layers.30.post_attention_layernorm
-
+  
+  internvl3_8b_multiframe/layer.20:
+    model: InternVL3_8B_multiframe
+    layer: language_model.model.layers.20.post_attention_layernorm
+    
   qwen-2-5-omni-7b/layers.20:
     model: qwen-2-5-omni-7b
     layer: model.layers.20.post_attention_layernorm
@@ -28,11 +32,60 @@ features:
   whisper/layers.31:
     model: whisper
     layer: layers.31.fc2
+  
+  videomae2/model.blocks.25.mlp.fc2gp:
+    model: videomae2
+    layer: model.blocks.25.mlp.fc2gp
+  
+  videomae2/model.blocks.25.mlp.fc2avg:
+    model: videomae2
+    layer: model.blocks.25.mlp.fc2avg
 
   MFCC/audio:
     model: MFCC
     layer: audio
-    
+  
+  bert-base-uncased/language_pooler_output: # Not sure why this is not working
+    model: bert-base-uncased
+    layer: language_pooler_output
+  
+  bert-base-uncased/language_last_hidden_state: # Not sure why this is not working
+    model: bert-base-uncased
+    layer: language_last_hidden_state
+  
+  modernBert/mean_pooling_output:
+    model: modernBert
+    layer: mean_pooling_output
+
+  emonet/visual:
+    model: emonet
+    layer: visual
+    stem: _20perTR
+
+  llama_3.2_1B/layers.7:
+    model: Llama-3.2-1B
+    layer: model.layers.7
+
+  llama_3.2_3B/layers.7:
+    model: Llama-3.2-3B
+    layer: model.layers.7
+
+  llama_3.2_3B/layers.5:
+    model: Llama-3.2-3B
+    layer: model.layers.5
+
+  llama_3.2_3B/layers.15:
+    model: Llama-3.2-3B
+    layer: model.layers.15
+  
+  llama_3.2_3B/layers.19:
+    model: Llama-3.2-3B
+    layer: model.layers.19
+  
+  llama_3.2_3B/layers.11:
+    model: Llama-3.2-3B
+    layer: model.layers.11
+
   llama_3.2_1b/layers.7:
     model: meta-llama__Llama-3.2-1B
     layer: model.layers.7

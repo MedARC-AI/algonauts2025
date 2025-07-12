@@ -8,23 +8,26 @@ now=$(TZ=America/New_York date '+%y%m%d%H%M')
 # Model 1
 uv run python train_feature_encoder.py \
     --overrides \
-    out_dir=output/feature_encoding_replaceintervl3multiframe_add_qwen3b_vjepa2_enc-kernel-45_${now} \
-    "include_features=[llama_3.2_1b/layers.7,whisper/layers.12,qwen-2-5-omni-3b/layers.20,internvl3_8b_multiframe/layer.20, vjepa2/encoder.layernorm_avg]" \
+    out_dir=output/feature_encoding_data-all-but-life_replace_internvl3-14B_remove_llama_add_qwen3b_vjepa2_enc-kernel-45_${now} \
+    "include_features=[whisper/layers.12,qwen-2-5-omni-3b/layers.20,internvl3_14b/layers.30, vjepa2/encoder.layernorm_avg]" \
     model.encoder_kernel_size=45\
+    "datasets.train.filter.seasons=[1, 2, 3, 4, 5, 6]" \
+    "datasets.train.filter.movies=["bourne", "wolf", "figures"]" \
+    epochs=10 \
     datasets_root=./datasets/ #/dev/shm/algonauts2025
 
 # uv run python submit_feature_encoder.py \
 #     --overrides \
-#     out_dir=output/feature_encoding_remove_llama_remove_whisper_add_MFCC_qwen3b_vjepa2_enc-kernel-45_${now} \
-#     datasets_root=./datasets/
+#     out_dir=output/feature_encoding_data-all_replace_internvl3-14B_llama-3B_add_qwen3b_vjepa2_enc-kernel-45_${now} \
+#     datasets_root=./datasets/\
+#     test_set_name=ood
 
 # Model 2
 # uv run python submit_feature_encoder.py \
 #     --overrides \
-#     out_dir=output/feature_encoding_remove_llama_qwen3b_vjepa2_enc-kernel-45_2507102030 \
+#     out_dir=output/feature_encoding_data-all_replace_internvl3-14B_remove_llama_add_qwen3b_vjepa2_enc-kernel-45_2507112307 \
 #     datasets_root=./datasets/ \
 #     test_set_name=ood
-
 
 # Model 3
 # ...

@@ -31,6 +31,10 @@ class Algonauts2025Dataset(IterableDataset):
             fmri_data = {ep: fmri_data[ep] for ep in episode_list}
 
         if feat_data:
+            # Debugging
+            # for ii in range(len(feat_data)): 
+                # print(f"feature:{ii}")
+                # print(feat_data[ii].keys())
             feat_data = [
                 {
                     # no run in the feature episodes.
@@ -402,7 +406,11 @@ def load_developer_features(
     layer: str,
 series: str = "friends"
 ) -> dict[str, np.ndarray]:
-    all_h5_files = sorted((Path(root) / model).rglob("*.h5"))
+    all_h5_files = sorted((Path(root) / model).rglob("*/*.h5"))
+    print(root)
+    print(model)
+    print('h5 files:')
+    print(all_h5_files)
     if series == "friends":
         keywords = {"friends"}
     elif series == "movie10":
@@ -414,7 +422,10 @@ series: str = "friends"
     for path in paths:
         episode = path.stem.split("_")[-3]  # s01e01a, bourne01    
         with h5py.File(path) as f:
-            tmp = f[f'{episode}/{layer}'][:].squeeze()
+            if episode in f.keys():
+                tmp = f[f'{episode}/{layer}'][:].squeeze()
+            else:
+                tmp =f[f'{layer}'][:].squeeze()
             features[episode] = tmp.reshape(tmp.shape[0],-1)
     return features
 
