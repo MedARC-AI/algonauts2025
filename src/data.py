@@ -407,10 +407,6 @@ def load_developer_features(
 series: str = "friends"
 ) -> dict[str, np.ndarray]:
     all_h5_files = sorted((Path(root) / model).rglob("*/*.h5"))
-    print(root)
-    print(model)
-    print('h5 files:')
-    print(all_h5_files)
     if series == "friends":
         keywords = {"friends"}
     elif series == "movie10":
