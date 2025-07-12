@@ -20,7 +20,11 @@ from data import (
     load_sharded_features,
     episode_filter,
 )
-from models import MultiSubjectConvLinearEncoder, CrossSubjectConvLinearEncoder
+from models import (
+    MultiSubjectConvLinearEncoder,
+    MultiSubjectConvAttnLinearEncoder,
+    CrossSubjectConvLinearEncoder,
+)
 from transformer import Transformer
 from conv1dnext import Conv1dNext
 from utils import pearsonr_score, get_sha
@@ -30,6 +34,11 @@ SUBJECTS = (1, 2, 3, 5)
 ROOT = Path(__file__).parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
+
+MODELS_DICT = {
+    "multi_sub_conv_linear": MultiSubjectConvLinearEncoder,
+    "multi_sub_conv_attn_linear": MultiSubjectConvAttnLinearEncoder,
+}
 
 
 def main(cfg: DictConfig):
@@ -82,7 +91,8 @@ def main(cfg: DictConfig):
     else:
         hidden_model = None
 
-    model = MultiSubjectConvLinearEncoder(
+    model_cls = MODELS_DICT[cfg.model_name]
+    model = model_cls(
         feat_dims=feat_dims,
         hidden_model=hidden_model,
         **cfg.model,

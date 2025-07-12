@@ -4,7 +4,12 @@ from typing import Literal
 import torch
 from torch import nn
 
-from layers import DepthConv1d, LinearPoolLatent, AttentionPoolLatent
+from layers import (
+    DepthConv1d,
+    LinearPoolLatent,
+    AttentionPoolLatent,
+    MultiAttentionPoolLatent,
+)
 
 
 class ConvLinear(nn.Module):
@@ -305,6 +310,114 @@ def _make_feat_embed(
     else:
         embed = nn.Linear(feat_dim, embed_dim)
     return embed
+
+
+class MultiSubjectConvAttnLinearEncoder(nn.Module):
+    weight: torch.Tensor
+
+    def __init__(
+        self,
+        num_subjects: int = 4,
+        feat_dims: tuple[int | tuple[int, int], ...] = (2048,),
+        embed_dim: int = 256,
+        target_dim: int = 1000,
+        hidden_model: nn.Module | None = None,
+        global_pool: Literal["attn"] = "attn",
+        encoder_kernel_size: int = 33,
+        decoder_kernel_size: int = 0,
+        encoder_causal: bool = True,
+        encoder_positive: bool = False,
+        encoder_blockwise: bool = False,
+        pool_num_heads: int = 4,
+        with_shared_decoder: bool = True,
+        with_subject_decoders: bool = True,
+    ):
+        super().__init__()
+        assert with_shared_decoder or with_subject_decoders
+        assert global_pool == "attn"
+        assert hidden_model is None
+        assert encoder_kernel_size > 1
+        self.num_subjects = num_subjects
+
+        # list of (nfeats, dim)
+        feat_dims = [(1, dim) if isinstance(dim, int) else dim for dim in feat_dims]
+
+        # only conv1d to align in time, will project dimension inside attention
+        self.feat_embeds = nn.ModuleList(
+            [
+                DepthConv1d(
+                    dim[1],
+                    kernel_size=encoder_kernel_size,
+                    causal=encoder_causal,
+                    positive=encoder_positive,
+                    blockwise=encoder_blockwise,
+                )
+                for dim in feat_dims
+            ]
+        )
+
+        self.feat_pool = MultiAttentionPoolLatent(
+            [dim[1] for dim in feat_dims],
+            embed_dim=embed_dim,
+            num_heads=pool_num_heads,
+        )
+
+        if with_shared_decoder:
+            self.shared_decoder = nn.Linear(embed_dim, target_dim)
+        else:
+            self.register_module("shared_decoder", None)
+
+        if decoder_kernel_size > 1:
+            decoder_linear = partial(ConvLinear, kernel_size=decoder_kernel_size)
+        else:
+            decoder_linear = nn.Linear
+
+        if with_subject_decoders:
+            self.subject_decoders = nn.ModuleList(
+                [decoder_linear(embed_dim, target_dim) for _ in range(num_subjects)]
+            )
+        else:
+            self.register_module("subject_decoders", None)
+
+        self.apply(_init_weights)
+
+    def forward(self, features: list[torch.Tensor]):
+        # features: list of (N, T, D_i) or (N, T, L_i, D_i)
+        N, T = features[0].shape[:2]
+
+        embed_features: list[torch.Tensor] = []
+        for feat, feat_embed in zip(features, self.feat_embeds):
+            # view as (N, L_i, T, D_i)
+            feat = feat[:, None] if feat.ndim == 3 else feat.transpose(1, 2)
+
+            # align in time, shape stays (N, L_i, T, D_i)
+            feat = feat_embed(feat)
+
+            # reshape for pool over features
+            Ni, Li, Ti, Di = feat.shape
+            assert (N, T) == (Ni, Ti)
+            feat = feat.transpose(1, 2).reshape(N * T, Li, Di)
+            embed_features.append(feat)
+
+        embed = self.feat_pool(embed_features)  # [N * T, D]
+        embed = embed.reshape(N, T, embed.shape[-1])
+
+        if self.shared_decoder is not None:
+            shared_output = self.shared_decoder(embed)
+            shared_output = shared_output[:, None].expand(-1, self.num_subjects, -1, -1)
+        else:
+            shared_output = 0.0
+
+        if self.subject_decoders is not None:
+            subject_output = torch.stack(
+                [decoder(embed) for decoder in self.subject_decoders],
+                dim=1,
+            )
+        else:
+            subject_output = 0.0
+
+        output = subject_output + shared_output
+        return output
 
 
 def _init_weights(m: nn.Module) -> None:
