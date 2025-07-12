@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
 import os
+import numpy as np
+import zipfile
 
 def find_scores_json_parents(root_dir="."):
     root_path = Path(root_dir)
@@ -11,14 +13,17 @@ def find_scores_json_parents(root_dir="."):
     return parent_folders
 
 all_submission_dirs = find_scores_json_parents(".")
+npys = []
+acc = {}
+index = {}
 for ii, dir in enumerate(all_submission_dirs):
     print(f"Submission{ii}:{dir}")
     json_path = os.path.join(dir, "scores.json")
+    npy_files = [f for f in os.listdir(dir) if f.endswith('.npy')]
+    npys.append(np.load(os.path.join(dir, npy_files[0]),allow_pickle=True).item())
+
     with open(json_path,'r', encoding='utf-8') as file:
         data = json.load(file)  # Returns a Python dict/list
-        if ii == 0:
-            acc = {}
-            index = {}
         for key,values in data.items():
             if '_' in key:
                 # Split into ['sub-01', 'movie-chaplin']
@@ -49,3 +54,30 @@ grand_mean = np.mean(grand_mean)
 print(f"Across-subject Expected OOD Mean Accuracy: {grand_mean:.4f}")
 print(acc)
 print(index)
+
+# Now we get the actual submission file
+final_submission = npys[0].copy()
+print(f"Stiching files from submissions...")
+for subject, episodes_dict in final_submission.items():
+    for episode, values in episodes_dict.items():
+        matching_key = next(
+            (key for key in index[subject].keys() if episode.startswith(key)),
+            None
+        )
+        if matching_key is not None:
+            curr_index = index[subject][matching_key]
+        else:
+            ValueError(f"No matching key found for episode '{episode}'.")
+        
+        final_submission[subject][episode] = npys[curr_index][subject][episode]
+
+print(f"Saving final submission file...")
+os.makedirs(f"./output/bestof{len(all_submission_dirs)}submissions", exist_ok=True)
+save_path = os.path.join(f"./output/bestof{len(all_submission_dirs)}submissions", "fmri_predictions_ood_combined.npy")
+np.save(save_path, final_submission, allow_pickle=True)
+print(f'Saving final submission to {save_path}')
+zip_file = save_path.replace("npy","zip")
+with zipfile.ZipFile(zip_file, 'w') as zipf:
+    zipf.write(save_path, os.path.basename(save_path))
+print(f"Submission file successfully zipped as: {zip_file}")
+print(final_submission['sub-01']['chaplin1'][:5])

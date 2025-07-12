@@ -32,9 +32,9 @@ class Algonauts2025Dataset(IterableDataset):
 
         if feat_data:
             # Debugging
-            # for ii in range(len(feat_data)): 
-                # print(f"feature:{ii}")
-                # print(feat_data[ii].keys())
+            for ii in range(len(feat_data)): 
+                print(f"feature:{ii}")
+                print(feat_data[ii].keys())
             feat_data = [
                 {
                     # no run in the feature episodes.
