@@ -16,7 +16,6 @@ from data import (
     Algonauts2025Dataset,
     load_algonauts2025_friends_fmri,
     load_algonauts2025_movie10_fmri,
-    load_merged_features,
     load_sharded_features,
     episode_filter,
 )
@@ -209,9 +208,12 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
 
     all_features = []
     for feat_name in cfg.include_features:
-        feat_cfg = cfg.features[feat_name]
-        print(f"loading features {feat_name}:\n\n{OmegaConf.to_yaml(feat_cfg)}")
-        features = load_features(**feat_cfg)
+        model, layer = feat_name.split("/")
+        feat_cfg = cfg.features[model]
+        model_name = feat_cfg.model
+        layer_name = feat_cfg.layers[layer]
+        print(f"loading features {feat_name} ({model_name}/{layer_name})")
+        features = load_features(cfg, model_name, layer_name)
 
         # pre-pool features if we are doing average pooling, to save space and time.
         if cfg.model.global_pool == "avg":
@@ -245,42 +247,14 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
     return data_loaders
 
 
-def load_features(
-    model: str,
-    layer: str,
-    stem: str | None = None,
-) -> dict[str, np.ndarray]:
-    merged_feature_models = {
-        "meta-llama__Llama-3.2-1B",
-    }
-
-    feat_type = "merged" if model in merged_feature_models else "sharded"
-
+def load_features(cfg: DictConfig, model: str, layer: str) -> dict[str, np.ndarray]:
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
-
-    if feat_type == "sharded":
-        assert stem is None, "stem not used"
-        friends_features = load_sharded_features(
-            data_dir / "features.sharded", model=model, layer=layer, series="friends"
-        )
-        movie10_features = load_sharded_features(
-            data_dir / "features.sharded", model=model, layer=layer, series="movie10"
-        )
-    else:
-        friends_features = load_merged_features(
-            data_dir / "features.merged",
-            model=model,
-            layer=layer,
-            series="friends",
-            stem=stem,
-        )
-        movie10_features = load_merged_features(
-            data_dir / "features.merged",
-            model=model,
-            layer=layer,
-            series="movie10",
-            stem=stem,
-        )
+    friends_features = load_sharded_features(
+        data_dir / "features.sharded", model=model, layer=layer, series="friends"
+    )
+    movie10_features = load_sharded_features(
+        data_dir / "features.sharded", model=model, layer=layer, series="movie10"
+    )
     features = {**friends_features, **movie10_features}
     return features
 

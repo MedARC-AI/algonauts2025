@@ -26,53 +26,55 @@ conv1dnext:
   causal: false
 
 features:
-  internvl3_8b/layers.20:
+  internvl3_8b:
     model: internvl3_8b_8bit
-    layer: language_model.model.layers.20.post_attention_layernorm
+    layers:
+      layers.10: language_model.model.layers.10.post_attention_layernorm
+      layers.15: language_model.model.layers.15.post_attention_layernorm
+      layers.20: language_model.model.layers.20.post_attention_layernorm
+      norm: language_model.model.norm
 
-  qwen-2-5-omni-7b/layers.20:
+  qwen-2-5-omni-7b:
     model: qwen-2-5-omni-7b
-    layer: model.layers.20.post_attention_layernorm
+    layers:
+      layers.5: model.layers.5.post_attention_layernorm
+      layers.10: model.layers.10.post_attention_layernorm
+      layers.15: model.layers.15.post_attention_layernorm
+      layers.20: model.layers.20.post_attention_layernorm
+      norm: model.norm
 
-  whisper/layers.12:
+  whisper:
     model: whisper
-    layer: layers.12.fc2
+    layers:
+      layers.12: layers.12.fc2
+      layers.25: layers.25.fc2
+      layers.31: layers.31.fc2
+      norm: layer_norm
 
-  llama_3.2_1b/layers.7:
+  llama_3.2_1b:
     model: Llama-3.2-1B
-    layer: model.layers.7
+    layers:
+      layers.7: model.layers.7
+      layers.11: model.layers.11
+      layers.15: model.layers.15
 
-  llama_3.2_3b/layers.5:
+  llama_3.2_3b:
     model: Llama-3.2-3B
-    layer: model.layers.5
+    layers:
+      layers.7: model.layers.7
+      layers.11: model.layers.11
+      layers.15: model.layers.15
+      layers.19: model.layers.19
+      layers.23: model.layers.23
 
-  llama_3.2_3b/layers.15:
-    model: Llama-3.2-3B
-    layer: model.layers.15
-
-  dinov2/blocks.5:
-    model: vit_giant_patch14_reg4_dinov2.lvd142m
-    layer: blocks.5
-
-  dinov2/blocks.15:
-    model: vit_giant_patch14_reg4_dinov2.lvd142m
-    layer: blocks.15
-
-  dinov2/blocks.25:
-    model: vit_giant_patch14_reg4_dinov2.lvd142m
-    layer: blocks.25
-
-  dinov2/blocks.35:
-    model: vit_giant_patch14_reg4_dinov2.lvd142m
-    layer: blocks.35
-
-  dinov2/embedding:
-    model: vit_giant_patch14_reg4_dinov2.lvd142m
-    layer: embedding
-
-  vjepa2/layernorm:
+  vjepa2:
     model: vjepa2_avg_feat
-    layer: encoder.layernorm_avg
+    layers:
+      layers.5: encoder.layer.5.norm1_avg
+      layers.15: encoder.layer.15.norm1_avg
+      layers.25: encoder.layer.25.norm1_avg
+      layers.35: encoder.layer.35.norm1_avg
+      norm: encoder.layernorm_avg
 
 include_features:
   - internvl3_8b/layers.20
