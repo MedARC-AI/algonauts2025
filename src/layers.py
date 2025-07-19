@@ -124,42 +124,21 @@ class LinearPoolLatent(nn.Module):
 
 
 class AttentionPoolLatent(nn.Module):
-    """Learned attention-based pooling over a set of features.
-
-    Copied from timm with some minor changes.
-
-    https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/attention_pool.py
-    """
-
     def __init__(
         self,
         embed_dim: int,
-        feat_size: int,
         num_heads: int = 8,
-        qkv_bias: bool = True,
-        drop: float = 0.0,
     ):
-        assert embed_dim % num_heads == 0
-
         super().__init__()
+        assert embed_dim % num_heads == 0
         self.embed_dim = embed_dim
-        self.feat_size = feat_size
         self.num_heads = num_heads
-
-        self.pos_embed = nn.Parameter(torch.zeros(feat_size, embed_dim))
-
-        self.query = nn.Parameter(torch.zeros(1, 1, embed_dim))
-
-        self.k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.query = nn.Parameter(torch.zeros(embed_dim))
+        self.kv = nn.Linear(embed_dim, 2 * embed_dim)
         self.proj = nn.Linear(embed_dim, embed_dim)
-        self.proj_drop = nn.Dropout(drop)
-
         self.init_weights()
 
     def init_weights(self):
-        # todo: maybe different inits since most of our dims are small.
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
         nn.init.trunc_normal_(self.query, std=0.02)
 
     def forward(self, x: torch.Tensor):
@@ -168,24 +147,18 @@ class AttentionPoolLatent(nn.Module):
         N = len(x)
         h = self.num_heads
 
-        # position embed
-        x = x + self.pos_embed.to(x.dtype)
-
         # fixed learned query
-        # nb, timm also had a q layer, which just applied to the learned latent. this
-        # is in principle unnecessary, since the query is an unconstrained parameter.
-        # however maybe there is some magic learning dynamics reason. gonna try this
-        # simpler version first though.
-        q = self.query.expand(N, 1, C).reshape(N, 1, h, C // h).transpose(1, 2)
+        q = self.query.expand(N, 1, C)
+        q = q.reshape(N, 1, h, C // h).transpose(1, 2)  # [N, h, 1, C]
 
-        # attention
-        k = self.k(x).reshape(N, L, h, C // h).transpose(1, 2)
-        v = self.v(x).reshape(N, L, h, C // h).transpose(1, 2)
+        # keys, values for each input feature map
+        kv = self.kv(x)
+        kv = kv.reshape(N, L, 2, h, C // h).permute(2, 0, 3, 1, 4)  # [2, N, h, L, C]
+        k, v = torch.unbind(kv, dim=0)
 
-        x = F.scaled_dot_product_attention(q, k, v)
-        x = x.transpose(1, 2).reshape(N, C)
+        x = F.scaled_dot_product_attention(q, k, v)  # [N, h, 1, C]
+        x = x.reshape(N, C)
         x = self.proj(x)
-        x = self.proj_drop(x)
 
         x = x.reshape(leading_dims + [C])
         return x
