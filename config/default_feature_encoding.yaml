@@ -4,7 +4,7 @@ model_name: multi_sub_conv_linear
 
 model:
   embed_dim: 192
-  encoder_kernel_size: 33
+  encoder_kernel_size: 45
   decoder_kernel_size: 0
   hidden_model: null
   global_pool: avg
@@ -33,6 +33,23 @@ features:
       layers.15: language_model.model.layers.15.post_attention_layernorm
       layers.20: language_model.model.layers.20.post_attention_layernorm
       norm: language_model.model.norm
+
+  internvl3_14b:
+    model: InternVL3_14B
+    layers:
+      layers.20: language_model.model.layers.20.post_attention_layernorm
+      layers.30: language_model.model.layers.30.post_attention_layernorm
+      layers.40: language_model.model.layers.40.post_attention_layernorm
+      layers.47: language_model.model.layers.47.post_attention_layernorm
+      norm: language_model.model.norm
+
+  qwen-2-5-omni-3b:
+    model: qwen2-5_3B
+    layers:
+      layers.10: model.layers.10.post_attention_layernorm
+      layers.15: model.layers.15.post_attention_layernorm
+      layers.20: model.layers.20.post_attention_layernorm
+      norm: model.norm
 
   qwen-2-5-omni-7b:
     model: qwen-2-5-omni-7b
@@ -77,9 +94,11 @@ features:
       norm: encoder.layernorm_avg
 
 include_features:
-  - internvl3_8b/layers.20
+  - llama_3.2_3b/layers.11
   - whisper/layers.12
-  - llama_3.2_1b/layers.7
+  - qwen-2-5-omni-3b/layers.20
+  - internvl3_14b/layers.30
+  - vjepa2/encoder.layernorm_avg
 
 datasets:
   train:
