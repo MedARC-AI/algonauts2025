@@ -98,7 +98,7 @@ include_features:
   - whisper/layers.12
   - qwen-2-5-omni-3b/layers.20
   - internvl3_14b/layers.30
-  - vjepa2/encoder.layernorm_avg
+  - vjepa2/norm
 
 datasets:
   train:
