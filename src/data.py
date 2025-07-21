@@ -159,7 +159,8 @@ class Algonauts2025Dataset(IterableDataset):
         # Nb, fmri and feature length often off by 1 or 2.
         # But assuming time locked to start.
         length = fmri_length or feat_length
-        feats = _pad_trunc_features(feats, length)
+        if feats is not None:
+            feats = _pad_trunc_features(feats, length)
 
         if fmri is not None:
             fmri = torch.from_numpy(fmri).float()
