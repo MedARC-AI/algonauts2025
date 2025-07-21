@@ -134,7 +134,7 @@ datasets:
     num_samples: null
     shuffle: false
 
-val_set_name: val_s6
+val_set_name: val_figures
 
 batch_size: 16
 lr: 3e-4

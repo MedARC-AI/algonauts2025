@@ -13,7 +13,7 @@ datasets:
   train:
     filter:
       seasons: [1, 2, 3, 4, 5]
-      movies: []
+      movies: ["bourne", "wolf"]
     sample_length: 64
     num_samples: 2000
     shuffle: True
@@ -42,6 +42,8 @@ datasets:
     sample_length: null
     num_samples: null
     shuffle: false
+
+val_set_name: val_figures
 
 batch_size: 16
 lr: 3e-4
