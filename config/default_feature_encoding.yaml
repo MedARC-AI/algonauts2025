@@ -1,8 +1,8 @@
-out_dir: output/feature_encoding
+out_dir: output_ense_2/feature_encoding_tt
 
 model:
   embed_dim: 192
-  encoder_kernel_size: 33
+  encoder_kernel_size: 45
   decoder_kernel_size: 0
   hidden_model: null
   global_pool: avg
@@ -148,15 +148,17 @@ features:
     layer: encoder.layernorm_avg
 
 include_features:
-  - internvl3_8b/layers.20
+  - llama_3.2_3B/layers.11
   - whisper/layers.12
-  - llama_3.2_1b/layers.7
+  - qwen-2-5-omni-3b/layers.20
+  - internvl3_14b/layers.30
+  - vjepa2/encoder.layernorm_avg
 
 datasets:
   train:
     filter:
       seasons: [1, 2, 3, 4, 5, 6]
-      movies: ["bourne", "wolf","figures"]
+      movies: ["wolf","figures"]
     sample_length: 64
     num_samples: 2000
     shuffle: True
@@ -170,13 +172,13 @@ datasets:
   #   num_samples: null
   #   shuffle: false
 
-  # val_figures:
-  #   filter:
-  #     seasons: []
-  #     movies: ["figures"]
-  #   sample_length: null
-  #   num_samples: null
-  #   shuffle: false
+  val_bourne:
+    filter:
+      seasons: []
+      movies: ["bourne"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
 
   val_life:
     filter:
@@ -197,5 +199,5 @@ freeze_decoder: false
 datasets_root: null
 
 seed: 3315
-overwrite: false
+overwrite: true
 device: cuda
