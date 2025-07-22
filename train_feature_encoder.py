@@ -90,8 +90,10 @@ def main(cfg: DictConfig):
     else:
         hidden_model = None
 
+    subjects = cfg.get("subjects", SUBJECTS)
     model_cls = MODELS_DICT[cfg.model_name]
     model = model_cls(
+        num_subjects=len(subjects),
         feat_dims=feat_dims,
         hidden_model=hidden_model,
         **cfg.model,
@@ -135,6 +137,7 @@ def main(cfg: DictConfig):
     )
 
     best_acc = None
+    tic = time.monotonic()
 
     for epoch in range(cfg.epochs):
         train_one_epoch(
@@ -157,6 +160,7 @@ def main(cfg: DictConfig):
                 val_loader=loader,
                 device=device,
                 ds_name=name,
+                subjects=subjects,
             )
             val_accs[name] = acc
             if name == cfg.val_set_name:
@@ -172,6 +176,9 @@ def main(cfg: DictConfig):
         else:
             # early stopping
             break
+
+    run_time = time.monotonic() - tic
+    best_accs["run_time"] = run_time
 
     with (out_dir / "ckpt.pt").open("wb") as f:
         torch.save(
@@ -196,12 +203,13 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
     print("loading fmri data")
 
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
+    subjects = cfg.get("subjects", SUBJECTS)
 
     friends_fmri = load_algonauts2025_friends_fmri(
-        data_dir / "algonauts_2025.competitors", subjects=SUBJECTS
+        data_dir / "algonauts_2025.competitors", subjects=subjects
     )
     movie10_fmri = load_algonauts2025_movie10_fmri(
-        data_dir / "algonauts_2025.competitors", subjects=SUBJECTS
+        data_dir / "algonauts_2025.competitors", subjects=subjects
     )
     all_fmri = {**friends_fmri, **movie10_fmri}
     all_episodes = list(all_fmri)
@@ -360,8 +368,10 @@ def evaluate(
     val_loader: DataLoader,
     device: torch.device,
     ds_name: str = "val",
+    subjects: list[str] | None = None,
 ):
     model.eval()
+    subjects = subjects or SUBJECTS
 
     loss_m = AverageMeter()
 
@@ -397,13 +407,13 @@ def evaluate(
     dim = samples.shape[-1]
     acc = 0.0
     acc_map = np.zeros(dim)
-    for ii, sub in enumerate(SUBJECTS):
+    for ii, sub in enumerate(subjects):
         y_true = samples[ii].reshape(-1, dim)
         y_pred = outputs[ii].reshape(-1, dim)
         metrics[f"accmap_sub-{sub}"] = acc_map_i = pearsonr_score(y_true, y_pred)
         metrics[f"acc_sub-{sub}"] = acc_i = np.mean(acc_map_i)
-        acc_map += acc_map_i / len(SUBJECTS)
-        acc += acc_i / len(SUBJECTS)
+        acc_map += acc_map_i / len(subjects)
+        acc += acc_i / len(subjects)
 
     metrics["accmap_avg"] = acc_map
     metrics["acc_avg"] = acc

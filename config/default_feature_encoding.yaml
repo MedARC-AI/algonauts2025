@@ -2,6 +2,8 @@ out_dir: output/feature_encoding
 
 model_name: multi_sub_conv_linear
 
+subjects: [1, 2, 3, 5]
+
 model:
   embed_dim: 192
   encoder_kernel_size: 45
