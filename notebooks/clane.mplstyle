@@ -1,0 +1,52 @@
+lines.linewidth : 1.5
+lines.markersize: 3
+
+patch.linewidth: 0.5
+patch.facecolor: blue
+patch.edgecolor: eeeeee
+patch.antialiased: True
+
+font.sans-serif: Arial, Helvetica, Avant Garde, Computer Modern Sans serif, DejaVu Sans
+font.size: 8
+font.weight: medium
+
+mathtext.fontset : cm
+
+axes.facecolor: white
+axes.edgecolor: black
+axes.linewidth: 0.8
+axes.grid : True
+axes.titlesize: medium
+axes.titleweight: normal
+axes.labelsize: medium
+
+axes.prop_cycle: cycler('color', ['348ABD', 'A60628', '7A68A6', '467821', 'D55E00', 'CC79A7', '56B4E9', '009E73', 'F0E442', '0072B2'])
+
+xtick.major.size: 3.0
+xtick.minor.size: 1.5
+xtick.major.width: 0.5
+xtick.minor.width: 0.5
+xtick.direction: in
+xtick.labelsize: small
+
+ytick.major.size: 3.0
+ytick.minor.size: 1.5
+ytick.major.width: 0.5
+ytick.minor.width: 0.5
+ytick.direction: in
+ytick.labelsize: small
+
+grid.color: gray
+grid.linestyle: -
+grid.linewidth: 0.5
+grid.alpha: 0.5
+
+legend.fancybox: True
+legend.fontsize: small
+
+boxplot.flierprops.markeredgewidth: 0.8
+boxplot.flierprops.markersize: 3
+
+figure.figsize: 3.42, 2.565
+figure.dpi: 150
+savefig.dpi: 300
