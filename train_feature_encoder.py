@@ -19,11 +19,7 @@ from data import (
     load_sharded_features,
     episode_filter,
 )
-from models import (
-    MultiSubjectConvLinearEncoder,
-    MultiSubjectConvAttnLinearEncoder,
-    CrossSubjectConvLinearEncoder,
-)
+from models import MultiSubjectConvLinearEncoder
 from transformer import Transformer
 from conv1dnext import Conv1dNext
 from utils import pearsonr_score, get_sha
@@ -36,7 +32,6 @@ DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
 
 MODELS_DICT = {
     "multi_sub_conv_linear": MultiSubjectConvLinearEncoder,
-    "multi_sub_conv_attn_linear": MultiSubjectConvAttnLinearEncoder,
 }
 
 
@@ -100,30 +95,6 @@ def main(cfg: DictConfig):
     )
     print("model:", model)
 
-    if cfg.cross_checkpoint:
-        print("loading cross encoder checkpoint:", cfg.cross_checkpoint)
-        cross_model = CrossSubjectConvLinearEncoder(**cfg.cross_model)
-        ckpt = torch.load(cfg.cross_checkpoint, map_location="cpu", weights_only=False)
-
-        cross_model.load_state_dict(ckpt["model"])
-        cross_model.requires_grad_(False)
-        cross_model.to(device)
-        cross_model.eval()
-
-        if cfg.cross_init_decoder:
-            print("initializing decoder head from cross-encoder.")
-            missing_keys, unexpected_keys = model.load_state_dict(
-                ckpt["model"],
-                strict=False,
-            )
-            assert not any("decoder" in key for key in missing_keys)
-    else:
-        cross_model = None
-
-    if cfg.freeze_decoder:
-        model.shared_decoder.requires_grad_(False)
-        model.subject_decoders.requires_grad_(False)
-
     model = model.to(device)
 
     param_count = sum(p.numel() for p in model.parameters())
@@ -143,10 +114,8 @@ def main(cfg: DictConfig):
         train_one_epoch(
             epoch=epoch,
             model=model,
-            cross_model=cross_model,
             train_loader=train_loader,
             optimizer=optimizer,
-            cfg=cfg,
             device=device,
         )
 
@@ -281,10 +250,8 @@ def train_one_epoch(
     *,
     epoch: int,
     model: torch.nn.Module,
-    cross_model: torch.nn.Module | None,
     train_loader: DataLoader,
     optimizer: torch.optim.Optimizer,
-    cfg: DictConfig,
     device: torch.device,
 ):
     model.train()
@@ -310,15 +277,6 @@ def train_one_epoch(
         # forward pass
         output = model(feats)
         loss = F.mse_loss(output, sample)
-
-        if cfg.cross_distill_alpha > 0:
-            with torch.no_grad():
-                denoised_sample = cross_model(sample)
-            denoised_loss = F.mse_loss(output, denoised_sample)
-            loss = (
-                cfg.cross_distill_alpha * denoised_loss
-                + (1 - cfg.cross_distill_alpha) * loss
-            )
 
         loss_item = loss.item()
 
