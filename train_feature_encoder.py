@@ -258,10 +258,10 @@ def make_data_loaders(cfg: DictConfig) -> dict[str, DataLoader]:
 def load_features(cfg: DictConfig, model: str, layer: str) -> dict[str, np.ndarray]:
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
     friends_features = load_sharded_features(
-        data_dir / "features.sharded", model=model, layer=layer, series="friends"
+        data_dir / "features", model=model, layer=layer, series="friends"
     )
     movie10_features = load_sharded_features(
-        data_dir / "features.sharded", model=model, layer=layer, series="movie10"
+        data_dir / "features", model=model, layer=layer, series="movie10"
     )
     features = {**friends_features, **movie10_features}
     return features

@@ -1,6 +1,6 @@
-# MedARC Algonauts 2025 submission algonauts2025
+# MedARC Algonauts 2025 submission
 
-Repository for MedARC group tackling Algonauts 2025 challenge.
+Repository for MedARC group tackling the [Algonauts 2025 challenge](https://algonautsproject.com/).
 
 ## Installation
 
@@ -43,4 +43,12 @@ InternVL3_14B
 │   │   ├── InternVL3_14B/friends/s1/friends_s01e01a.h5
 │   │   ├── InternVL3_14B/friends/s1/friends_s01e01b.h5
 ...
-``
+```
+
+## Training the default model
+
+To train the model using the [default config](config/default_feature_encoding.yaml), run
+
+```sh
+uv run python train_feature_encoder.py
+```

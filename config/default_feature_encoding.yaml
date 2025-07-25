@@ -1,4 +1,4 @@
-out_dir: output/feature_encoding
+out_dir: output/feature_encoding_default
 
 model_name: multi_sub_conv_linear
 
