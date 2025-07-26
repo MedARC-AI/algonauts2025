@@ -26,6 +26,8 @@ datasets
 checkpoints
 wandb
 output
+config_ensemble
+output_ensemble
 
 # Local scratch/tmp
 .scratch

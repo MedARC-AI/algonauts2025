@@ -4,12 +4,8 @@
 set -e
 
 # Configuration
-VENV_PATH="/home/cesar/algo_sub/algonauts2025/.venv/bin/activate"
-CONFIGS_PATH="/home/cesar/algo_sub/algonauts2025/config_ensemble"
-LOG_DIR="/home/cesar/algo_sub/algonauts2025/config_ensemble/logs"
-
-# Activate virtual environment
-source "$VENV_PATH"
+CONFIGS_PATH="config_ensemble"
+LOG_DIR="config_ensemble/logs"
 
 # Create log directory
 mkdir -p "$LOG_DIR"
@@ -25,12 +21,23 @@ for i in "${!config_files[@]}"; do
     config_name=$(basename "$config_file" .yaml)
 
     echo "[$((i+1))/${#config_files[@]}] Processing: $config_name"
+    out_dir=$(cat $config_file | grep out_dir | awk '{print $2}')
+
+    if [[ -d $out_dir ]]; then
+        echo "Output dir: ${out_dir} exists; skipping"
+        continue
+    fi
 
     # Run training and save logs
-    uv run python train_and_inference_ood.py \
+    uv run python train_feature_encoder.py \
         --cfg-path "$config_file" \
-        --run_ood_prediction \
-        > "$LOG_DIR/${config_name}.log" 2> "$LOG_DIR/${config_name}.error"
+        | tee "$LOG_DIR/${config_name}.log"
+
+    uv run python submit_feature_encoder.py \
+        --overrides \
+        checkpoint_dir="${out_dir}" \
+        test_set_name=ood \
+        | tee -a "$LOG_DIR/${config_name}.log"
 
     echo "Completed: $config_name"
 done

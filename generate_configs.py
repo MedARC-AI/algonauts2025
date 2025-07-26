@@ -7,6 +7,10 @@ for the Algonauts 2025 feature encoding model.
 import yaml
 import os
 import itertools
+from pathlib import Path
+
+ROOT = Path(__file__).parent
+DEFAULT_CONFIG = ROOT / "config/default_feature_encoding.yaml"
 
 
 def load_base_config(config_path):
@@ -201,9 +205,7 @@ def generate_all_configs(base_config_path, output_dir, max_configs=None):
 
 
 def main():
-    base_config_path = (
-        "/home/cesar/algo_sub/algonauts2025/config/default_feature_encoding.yaml"
-    )
+    base_config_path = DEFAULT_CONFIG
     output_dir = "config_ensemble"
 
     # Generate configs - set max_configs to limit the number

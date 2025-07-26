@@ -65,3 +65,19 @@ uv run python submit_feature_encoder.py \
 ```
 
 To prepare a submission for Friends S7, set `test_set_name=friends-s7`. See the [submission config](config/default_submission.yaml) for more details.
+
+## Training the ensemble
+
+Generate the sweep of configs for training the ensemble
+
+```bash
+uv run generate_configs.py
+```
+
+Train all the models in the ensemble
+
+```bash
+bash scripts/run_multiple_config_training.sh
+```
+
+Ensemble the top predictions for each subject and parcel by running the notebook [prepare_stitching_submission.ipynb](prepare_stitching_submission.ipynb).
