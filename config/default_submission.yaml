@@ -1,16 +1,9 @@
-out_dir: null
+# path to trained encoder output directory
+checkpoint_dir: null
 
-features:
-  - model: internvl3_8b_8bit
-    layer: language_model.model.layers.20.post_attention_layernorm
-
-  - model: whisper
-    layer: layers.12.fc2
-
-  - model: meta-llama__Llama-3.2-1B
-    layer: model.layers.7
-    stem: context-long
-
+# names of test sets:
+#   friends-s7
+#   ood
 test_set_name: friends-s7
 
 datasets_root: null

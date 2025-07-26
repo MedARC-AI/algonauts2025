@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -9,7 +10,6 @@ from omegaconf import DictConfig, OmegaConf
 
 from data import (
     Algonauts2025Dataset,
-    load_merged_features,
     load_sharded_features,
     episode_filter,
 )
@@ -24,6 +24,10 @@ ROOT = Path(__file__).parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_submission.yaml"
 
+MODELS_DICT = {
+    "multi_sub_conv_linear": MultiSubjectConvLinearEncoder,
+}
+
 
 def main(cfg: DictConfig):
     print("generating submission predictions for multi-subject fmri encoder")
@@ -32,8 +36,17 @@ def main(cfg: DictConfig):
     print(sha_info)
     print("config:", OmegaConf.to_yaml(cfg), sep="\n")
 
-    out_dir = Path(cfg.out_dir)
-    prev_cfg = OmegaConf.load(out_dir / "config.yaml")
+    ckpt_dir = Path(cfg.checkpoint_dir)
+    prev_cfg = OmegaConf.load(ckpt_dir / "config.yaml")
+
+    out_dir = ckpt_dir / f"submit_{cfg.test_set_name}"
+    if out_dir.exists():
+        if not cfg.overwrite:
+            print(f"output {out_dir} exists; exiting.")
+            return
+        shutil.rmtree(out_dir)
+
+    out_dir.mkdir(parents=True)
 
     device = torch.device(cfg.device)
     print(f"running on: {device}")
@@ -41,10 +54,16 @@ def main(cfg: DictConfig):
     print("creating data loader")
 
     fmri_num_samples = load_fmri_num_samples(cfg)
-    test_loader = make_data_loader(cfg, fmri_num_samples)
+    test_loader = make_data_loader(cfg, prev_cfg, fmri_num_samples)
 
-    example_batch = next(iter(test_loader))
-    feat_dims = [feat.shape[-1] for feat in example_batch["features"]]
+    batch = next(iter(test_loader))
+
+    feat_dims = []
+    for feat in batch["features"]:
+        # features can be (N, T, C) or (N, T, L, C)
+        dim = feat.shape[2] if feat.ndim == 3 else tuple(feat.shape[2:])
+        feat_dims.append(dim)
+
     print("feat dims:", feat_dims)
 
     print("creating model")
@@ -69,7 +88,7 @@ def main(cfg: DictConfig):
     )
     print("model:", model)
 
-    ckpt_path = out_dir / "ckpt.pt"
+    ckpt_path = ckpt_dir / "ckpt.pt"
     print("loading checkpoint:", ckpt_path)
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     model.load_state_dict(ckpt["model"], strict=True)
@@ -94,18 +113,40 @@ def main(cfg: DictConfig):
 
 def make_data_loader(
     cfg: DictConfig,
+    prev_cfg: DictConfig,
     fmri_num_samples: dict[str, int],
 ) -> DataLoader:
     all_features = []
-    for feat_cfg in cfg.features:
-        print(f"loading features:\n\n{OmegaConf.to_yaml(feat_cfg)}")
-        features = load_features(cfg, **feat_cfg)
+    for feat_name in prev_cfg.include_features:
+        model, layer = feat_name.split("/")
+        feat_cfg = prev_cfg.features[model]
+        model_name = feat_cfg.model
+        layer_name = feat_cfg.layers[layer]
+        print(f"loading features {feat_name} ({model_name}/{layer_name})")
+        features = load_features(prev_cfg, model_name, layer_name)
+
+        # pre-pool features if we are doing average pooling, to save space and time.
+        if prev_cfg.model.global_pool == "avg":
+            features = pool_features(features)
+
         all_features.append(features)
 
     all_episodes = list(all_features[0])
 
     if cfg.test_set_name == "friends-s7":
         filter_fn = episode_filter(seasons=[7], movies=[])
+    elif cfg.test_set_name == "ood":
+        filter_fn = episode_filter(
+            seasons=[],
+            movies=[
+                "chaplin",
+                "mononoke",
+                "passepartout",
+                "planetearth",
+                "pulpfiction",
+                "wot",
+            ],
+        )
     else:
         raise ValueError(f"test set {cfg.test_set_name} not implemented.")
 
@@ -130,47 +171,26 @@ def make_data_loader(
     return loader
 
 
-MODEL_FEATURE_TYPES = {
-    "internvl3_8b_8bit": "sharded",
-    "whisper": "sharded",
-    "meta-llama__Llama-3.2-1B": "merged",
-}
+def pool_features(features: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    pooled = {}
+    for key, feat in features.items():
+        assert feat.ndim in {2, 3}
+        if feat.ndim == 3:
+            feat = feat.mean(axis=1)
+        pooled[key] = feat
+    return pooled
 
 
-def load_features(
-    cfg: DictConfig,
-    model: str,
-    layer: str,
-    stem: str | None = None,
-) -> dict[str, np.ndarray]:
-    feat_type = MODEL_FEATURE_TYPES[model]
-
+def load_features(cfg: DictConfig, model: str, layer: str) -> dict[str, np.ndarray]:
     data_dir = Path(cfg.datasets_root or DEFAULT_DATA_DIR)
-
-    if feat_type == "sharded":
-        assert stem is None, "stem not used"
-        friends_features = load_sharded_features(
-            data_dir / "features.sharded", model=model, layer=layer, series="friends"
-        )
-        movie10_features = load_sharded_features(
-            data_dir / "features.sharded", model=model, layer=layer, series="movie10"
-        )
-    else:
-        friends_features = load_merged_features(
-            data_dir / "features.merged",
-            model=model,
-            layer=layer,
-            series="friends",
-            stem=stem,
-        )
-        movie10_features = load_merged_features(
-            data_dir / "features.merged",
-            model=model,
-            layer=layer,
-            series="movie10",
-            stem=stem,
-        )
-    features = {**friends_features, **movie10_features}
+    # TODO: we only really need to load friends s7 or ood, depending on the test set.
+    friends_features = load_sharded_features(
+        data_dir / "features", model=model, layer=layer, series="friends"
+    )
+    ood_features = load_sharded_features(
+        data_dir / "features", model=model, layer=layer, series="ood"
+    )
+    features = {**friends_features, **ood_features}
     return features
 
 

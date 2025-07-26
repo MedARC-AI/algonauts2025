@@ -52,3 +52,16 @@ To train the model using the [default config](config/default_feature_encoding.ya
 ```sh
 uv run python train_feature_encoder.py
 ```
+
+## Preparing submission
+
+To prepare a submission to [codabench](https://www.codabench.org/competitions/9483/) for the OOD movies, run
+
+```bash
+uv run python submit_feature_encoder.py \
+  --overrides \
+  checkpoint_dir=output/feature_encoding_default \
+  test_set_name=ood
+```
+
+To prepare a submission for Friends S7, set `test_set_name=friends-s7`. See the [submission config](config/default_submission.yaml) for more details.

@@ -348,7 +348,16 @@ def load_sharded_features(
 
     features = {}
     for path in paths:
-        episode = path.stem.split("_")[-1]  # friends_s01e01a, bourne01
+        if path.stem.endswith("_video"):
+            # task-chaplin1_video.h5
+            episode = path.stem.split("-")[-1]
+            episode = episode.split("_")[0]
+        else:
+            # figures01.h5
+            # movie10_figures01.h5
+            # friends_s01e01a.h5
+            episode = path.stem.split("_")[-1]  # friends_s01e01a, bourne01
+
         with h5py.File(path) as f:
             features[episode] = f[layer][:].squeeze()
     return features
