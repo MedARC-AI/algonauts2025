@@ -1,0 +1,150 @@
+out_dir: output/feature_encoding_default
+
+model_name: multi_sub_conv_linear
+
+subjects: [1, 2, 3, 5]
+
+model:
+  embed_dim: 192
+  encoder_kernel_size: 45
+  decoder_kernel_size: 0
+  hidden_model: null
+  global_pool: avg
+  encoder_causal: false
+  encoder_positive: false
+  encoder_blockwise: false
+  pool_num_heads: 3
+  with_shared_decoder: true
+  with_subject_decoders: true
+
+transformer:
+  num_heads: 3
+  depth: 6
+  mlp_ratio: 4.0
+
+conv1dnext:
+  depth: 6
+  kernel_size: 11
+  causal: false
+
+features:
+  internvl3_8b:
+    model: internvl3_8b_8bit
+    layers:
+      layers.10: language_model.model.layers.10.post_attention_layernorm
+      layers.15: language_model.model.layers.15.post_attention_layernorm
+      layers.20: language_model.model.layers.20.post_attention_layernorm
+      norm: language_model.model.norm
+
+  internvl3_14b:
+    model: InternVL3_14B
+    layers:
+      layers.20: language_model.model.layers.20.post_attention_layernorm
+      layers.30: language_model.model.layers.30.post_attention_layernorm
+      layers.40: language_model.model.layers.40.post_attention_layernorm
+      layers.47: language_model.model.layers.47.post_attention_layernorm
+      norm: language_model.model.norm
+
+  qwen-2-5-omni-3b:
+    model: qwen2-5_3B
+    layers:
+      layers.10: model.layers.10.post_attention_layernorm
+      layers.15: model.layers.15.post_attention_layernorm
+      layers.20: model.layers.20.post_attention_layernorm
+      norm: model.norm
+
+  qwen-2-5-omni-7b:
+    model: qwen-2-5-omni-7b
+    layers:
+      layers.5: model.layers.5.post_attention_layernorm
+      layers.10: model.layers.10.post_attention_layernorm
+      layers.15: model.layers.15.post_attention_layernorm
+      layers.20: model.layers.20.post_attention_layernorm
+      norm: model.norm
+
+  whisper:
+    model: whisper
+    layers:
+      layers.12: layers.12.fc2
+      layers.25: layers.25.fc2
+      layers.31: layers.31.fc2
+      norm: layer_norm
+
+  llama_3.2_1b:
+    model: Llama-3.2-1B
+    layers:
+      layers.7: model.layers.7
+      layers.11: model.layers.11
+      layers.15: model.layers.15
+
+  llama_3.2_3b:
+    model: Llama-3.2-3B
+    layers:
+      layers.7: model.layers.7
+      layers.11: model.layers.11
+      layers.15: model.layers.15
+      layers.19: model.layers.19
+      layers.23: model.layers.23
+
+  vjepa2:
+    model: vjepa2_avg_feat
+    layers:
+      layers.5: encoder.layer.5.norm1_avg
+      layers.15: encoder.layer.15.norm1_avg
+      layers.25: encoder.layer.25.norm1_avg
+      layers.35: encoder.layer.35.norm1_avg
+      norm: encoder.layernorm_avg
+
+include_features:
+  - llama_3.2_3b/layers.11
+  - whisper/layers.12
+  - qwen-2-5-omni-3b/layers.20
+  - internvl3_14b/layers.30
+  - vjepa2/norm
+
+datasets:
+  train:
+    filter:
+      seasons: [1, 2, 3, 4, 5]
+      movies: ["bourne", "wolf"]
+    sample_length: 64
+    num_samples: 2000
+    shuffle: True
+    seed: 42
+
+  val_s6:
+    filter:
+      seasons: [6]
+      movies: []
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_figures:
+    filter:
+      seasons: []
+      movies: ["figures"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_life:
+    filter:
+      seasons: []
+      movies: ["life"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+val_set_name: val_figures
+
+batch_size: 16
+lr: 3e-4
+weight_decay: 0.1
+epochs: 10
+
+datasets_root: null
+
+seed: 3315
+overwrite: false
+device: cuda

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "algonauts2025"
+dynamic = ["version"]
+description = "Algonauts 2025 modeling"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "av",
+    "datasets",
+    "huggingface_hub",
+    "ipython",
+    "jupyter",
+    "nilearn",
+    "matplotlib",
+    "numpy<2",
+    "omegaconf",
+    "pandas",
+    "pillow",
+    "pre-commit",
+    "pycortex",
+    "pytest",
+    "scikit-learn",
+    "scipy",
+    "timm",
+    "torch==2.6.0",
+    "tqdm",
+    "transformers",
+    "wandb",
+    "yaspy",
+    "neuromaps",
+]
+
+
+[tool.setuptools_scm]
+version_file = "src/_version.py"
+
+[tool.uv.sources]
+yaspy = { git = "https://github.com/childmindresearch/yaspy.git", rev = "629df8fe51fc085564b56ef2a2adddec869bfb9a" }

@@ -1,0 +1,12 @@
+# path to trained encoder output directory
+checkpoint_dir: null
+
+# names of test sets:
+#   friends-s7
+#   ood
+test_set_name: friends-s7
+
+datasets_root: null
+
+overwrite: false
+device: cuda

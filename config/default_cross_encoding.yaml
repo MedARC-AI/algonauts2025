@@ -1,0 +1,57 @@
+out_dir: output/cross_encoding
+
+model:
+  embed_dim: 64
+  encoder_kernel_size: 7
+  decoder_kernel_size: 0
+  with_shared_encoder: True
+  with_shared_decoder: True
+  with_subject_encoders: True
+  with_subject_decoders: True
+
+datasets:
+  train:
+    filter:
+      seasons: [1, 2, 3, 4, 5]
+      movies: ["bourne", "wolf"]
+    sample_length: 64
+    num_samples: 2000
+    shuffle: True
+    seed: 42
+
+  val_s6:
+    filter:
+      seasons: [6]
+      movies: []
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_figures:
+    filter:
+      seasons: []
+      movies: ["figures"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+  val_life:
+    filter:
+      seasons: []
+      movies: ["life"]
+    sample_length: null
+    num_samples: null
+    shuffle: false
+
+val_set_name: val_figures
+
+batch_size: 16
+lr: 3e-4
+weight_decay: 0.001
+epochs: 10
+
+datasets_root: null
+
+seed: 3315
+overwrite: false
+device: cuda
