@@ -16,7 +16,7 @@ Download the [official challenge dataset](https://github.com/courtois-neuromod/a
 
 ## Features
 
-Precomputed features extracted from a number of backbone models are available on [Huggingface](https://huggingface.co/datasets/medarc/AlgonautsDS-features). Once you have downloaded the features, copy or link them under `datasets/` like so
+Precomputed features extracted from a number of backbone models are available on [Huggingface](https://huggingface.co/datasets/medarc/algonauts_2025.features). Once you have downloaded the features, copy or link them under `datasets/` like so
 
 <!-- TODO: update with all features we used. -->
 
@@ -37,11 +37,21 @@ datasets/
 Each feature directory should have a structure like
 
 ```
-InternVL3_14B
-├── InternVL3_14B/friends
-│   ├── InternVL3_14B/friends/s1
-│   │   ├── InternVL3_14B/friends/s1/friends_s01e01a.h5
-│   │   ├── InternVL3_14B/friends/s1/friends_s01e01b.h5
+Llama-3.2-1B
+├── friends
+│   ├── s1
+│   │   ├── friends_s01e01a.h5
+│   │   ├── friends_s01e01b.h5
+...
+├── movie10
+│   ├── bourne
+│   │   ├── movie10_bourne01.h5
+│   │   ├── movie10_bourne02.h5
+...
+└── ood
+    ├── chaplin
+    │   ├── ood_chaplin1.h5
+    │   └── ood_chaplin2.h5
 ...
 ```
 
