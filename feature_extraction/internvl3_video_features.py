@@ -1307,11 +1307,10 @@ def main(cfg: DictConfig):
     torch.manual_seed(cfg.seed)
 
     parts = cfg.feature_extraction_parts
-    movies_base = cfg.dataset_dir / 'stimuli' / 'movies'
-    transcripts_base = cfg.root_dir / 'stimuli' / 'movies'
+    movies_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
+    transcripts_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
     out_dir = cfg.out_dir
     os.makedirs(out_dir, exist_ok=True)
-    root_dir = ROOT / cfg.dataset_root
 
     path = 'OpenGVLab/InternVL3-14B'
     device = torch.device("cuda")
@@ -1319,7 +1318,7 @@ def main(cfg: DictConfig):
         path,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-        use_flash_attn=True,
+        use_flash_attn=False,
         trust_remote_code=True,
         device_map=device
     ).eval()
