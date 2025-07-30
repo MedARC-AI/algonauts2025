@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import math
 from transformers import WhisperModel, AutoProcessor
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_whisper_features.yaml"
 
@@ -223,8 +223,8 @@ def extract_fn(video, audio, transcript, verbose, extractor, processor, model, d
 def main(cfg: DictConfig):
     torch.manual_seed(cfg.seed)
     parts = cfg.feature_extraction_parts
-    movies_base = Path(cfg.datasets_root) / 'stimuli' / 'movies'
-    transcripts_base = Path(cfg.datasets_root) / 'stimuli' / 'transcripts'
+    movies_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
+    transcripts_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
     out_dir = Path(cfg.out_dir)
     os.makedirs(out_dir, exist_ok=True)
     device = torch.device(cfg.device)
@@ -241,7 +241,7 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg-path", type=str, default=str(DEFAULT_CONFIG))
-    parser.add_argument("--overrides", type=str, default=None, nargs=")
+    parser.add_argument("--overrides", type=str, default=None, nargs="+")
     args = parser.parse_args()
     cfg = OmegaConf.load(args.cfg_path)
     if args.overrides:

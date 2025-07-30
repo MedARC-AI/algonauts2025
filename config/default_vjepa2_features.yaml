@@ -34,7 +34,7 @@ layers:
   - encoder.layer.5.mlp.fc2
   - encoder.layernorm
 
-datasets_root: /data
+dataset_dir: algonauts_2025.competitors/
 splits_overlap: 0.5
 past_context: 20
 num_frames: 15

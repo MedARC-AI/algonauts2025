@@ -26,7 +26,7 @@ from enum import IntEnum, auto
 import soundfile as sf
 from transformers import Qwen2_5OmniProcessor, Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniThinkerForConditionalGeneration
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_qwen_features.yaml"
 
@@ -448,8 +448,8 @@ def extract_fn(
 def main(cfg: DictConfig):
     torch.manual_seed(cfg.seed)
     parts = cfg.feature_extraction_parts
-    movies_base = Path(cfg.datasets_root) / 'stimuli' / 'movies'
-    transcripts_base = Path(cfg.datasets_root) / 'stimuli' / 'transcripts'
+    movies_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
+    transcripts_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
     out_dir = Path(cfg.out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -458,7 +458,7 @@ def main(cfg: DictConfig):
         torch_dtype=torch.bfloat16,
         attn_implementation="sdpa",
     ).eval()
-    device = torch.device(cfg.device)
+    device = torch.device("cuda")
     model = model.to(device)
     processor = Qwen2_5OmniProcessor.from_pretrained(cfg.model)
     processor.max_pixels = 128 * 28 * 28

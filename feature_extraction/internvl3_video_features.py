@@ -24,7 +24,7 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 import dataclasses
 from enum import IntEnum, auto
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_internvl3_features.yaml"
 
@@ -167,7 +167,8 @@ def load_audio(
     """
     try:
         # Set the backend to 'ffmpeg' if available
-        # torchaudio.set_audio_backend("ffmpeg")
+        torchaudio.set_audio_backend("ffmpeg")
+
         waveform, orig_sr = torchaudio.load(path)
 
         # Convert to mono if stereo is False and the waveform has multiple channels
@@ -246,6 +247,7 @@ def extract_features(
         raise FileNotFoundError(f"Transcripts directory not found: {transcripts_base}")
 
     # Iterate through all directories under movies_base.
+    # print("starting")
     for folder in movies_base.rglob('*'):
         if folder.is_dir() and folder.name in parts:
             # Iterate through mkv files in the matched directory.
@@ -257,7 +259,7 @@ def extract_features(
                     # Skip directories that are not under movies_base.
                     continue
 
-                print(rel_folder)
+                # print(rel_folder)
                 if "friends" in str(rel_folder):
                     # Build the corresponding transcript file path.
                     transcript_file = transcripts_base / rel_folder / movie_file.with_suffix('.tsv').name
@@ -1277,6 +1279,7 @@ def extract_fn(
         sentences = transcript if transcript and all(transcript) else None
         
         # Call the feature extraction helper. It is designed to handle `sentences` being None.
+        print("getting logits")
         logits, ranges, avg_logits = logits_by_pair(
             extractor, tokenizer,
             pixel_values, sentences,
@@ -1312,23 +1315,25 @@ def main(cfg: DictConfig):
     out_dir = cfg.out_dir
     os.makedirs(out_dir, exist_ok=True)
 
-    path = 'OpenGVLab/InternVL3-14B'
     device = torch.device("cuda")
     model = AutoModel.from_pretrained(
-        path,
+        cfg.model,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-        use_flash_attn=False,
+        use_flash_attn=True,
         trust_remote_code=True,
-        device_map=device
     ).eval()
+    model= model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(
-        path,
+        cfg.model,
         trust_remote_code=True,
         use_fast=False
     )
+    # print("loaded the model")
     layers_to_extract = cfg.layers
+    # print("extractor")
     extractor = HuggingFaceFeatureExtractor(model, layers_to_extract, detach=True)
+    # print("extract features")
     extract_features(parts = parts, movies_base = movies_base, transcripts_base = transcripts_base, output_dir = out_dir, extraction_fn = extract_fn, verbose = True, modality = 'all', past_context_in_seconds = cfg.past_context, splits_overlap=cfg.splits_overlap, ignore_done =[], ood=True)
 
 if __name__ == "__main__":

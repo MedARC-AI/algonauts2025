@@ -1,4 +1,4 @@
-out_dir: datasets/whisper_features
+out_dir: datasets/qwen2-5_3B
 feature_extraction_parts:
   - life
   - figures
@@ -18,14 +18,12 @@ feature_extraction_parts:
   - s6
   - s7
 
-model: openai/whisper-large-v3
+model: Qwen/Qwen2.5-Omni-3B
 layers:
-  - layer_norm
-  - layers.31.fc2
-  - layers.25.fc2
-  - layers.12.fc2
+  - model.layers.15.post_attention_layernorm
+  - model.layers.20.post_attention_layernorm
 
-datasets_root: /data
+dataset_dir: algonauts_2025.competitors/
 splits_overlap: 0.5
 past_context: 20
 

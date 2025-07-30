@@ -1,4 +1,4 @@
-out_dir: datasets/qwen2-5_3B
+out_dir: datasets/InternVL3_8B
 feature_extraction_parts:
   - life
   - figures
@@ -18,15 +18,16 @@ feature_extraction_parts:
   - s6
   - s7
 
-model: Qwen/Qwen2.5-Omni-3B
+model: OpenGVLab/InternVL3-8B
 layers:
-  - model.layers.15.post_attention_layernorm
-  - model.layers.20.post_attention_layernorm
+  - language_model.model.layers.20.post_attention_layernorm
+  # - language_model.model.layers.30.post_attention_layernorm 
 
-datasets_root: /data
+dataset_dir: algonauts_2025.competitors/
 splits_overlap: 0.5
 past_context: 20
 
 overwrite: true
 seed: 42
 device: cuda
+

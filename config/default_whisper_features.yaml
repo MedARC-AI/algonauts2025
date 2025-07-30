@@ -1,4 +1,4 @@
-out_dir: datasets/InternVL3_14B
+out_dir: datasets/whisper_features
 feature_extraction_parts:
   - life
   - figures
@@ -18,10 +18,12 @@ feature_extraction_parts:
   - s6
   - s7
 
-model: OpenGVLab/InternVL3-8B
+model: openai/whisper-large-v3
 layers:
-  - language_model.model.layers.20.post_attention_layernorm
-  - language_model.model.layers.30.post_attention_layernorm 
+  - layer_norm
+  - layers.31.fc2
+  - layers.25.fc2
+  - layers.12.fc2
 
 dataset_dir: algonauts_2025.competitors/
 splits_overlap: 0.5
@@ -30,4 +32,3 @@ past_context: 20
 overwrite: true
 seed: 42
 device: cuda
-

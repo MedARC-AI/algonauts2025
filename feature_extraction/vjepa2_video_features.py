@@ -21,7 +21,7 @@ import einops
 import torchvision.transforms as T
 from transformers import AutoVideoProcessor, AutoModel
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_vjepa2_features.yaml"
 
@@ -267,8 +267,8 @@ def extract_fn(video: torch.Tensor, audio: torch.Tensor, transcript: List[str], 
 def main(cfg: DictConfig):
     torch.manual_seed(cfg.seed)
     parts = cfg.feature_extraction_parts
-    movies_base = Path(cfg.datasets_root) / 'stimuli' / 'movies'
-    transcripts_base = Path(cfg.datasets_root) / 'stimuli' / 'transcripts'
+    movies_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
+    transcripts_base = DEFAULT_DATA_DIR / cfg.dataset_dir / 'stimuli' / 'movies'
     out_dir = Path(cfg.out_dir)
     os.makedirs(out_dir, exist_ok=True)
     device = torch.device(cfg.device)
