@@ -1,0 +1,33 @@
+out_dir: datasets/InternVL3_8B
+feature_extraction_parts:
+  - life
+  - figures
+  - bourne
+  - wolf
+  - chaplin
+  - mononoke
+  - passepartout
+  - planetearth
+  - wot
+  - pulpfiction
+  - s1
+  - s2
+  - s3
+  - s4
+  - s5
+  - s6
+  - s7
+
+model: OpenGVLab/InternVL3-8B
+layers:
+  - language_model.model.layers.20.post_attention_layernorm
+  # - language_model.model.layers.30.post_attention_layernorm 
+
+dataset_dir: algonauts_2025.competitors/
+splits_overlap: 0.5
+past_context: 20
+
+overwrite: true
+seed: 42
+device: cuda
+
