@@ -18,70 +18,11 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import math
 from transformers import WhisperModel, AutoProcessor
+from feature_extractor import FeatureExtractor
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_whisper_features.yaml"
-
-class HuggingFaceFeatureExtractor:
-    def __init__(self, model: nn.Module, layers: List[str], detach: bool = True):
-        self.model = model
-        self.detach = detach
-        self.layers = self._expand_layers(model, layers)
-        self._features: Dict[str, Any] = {}
-        self._handles: Dict[str, Any] = {}
-        self._register_hooks()
-
-    def _register_hooks(self):
-        for layer in self.layers:
-            sub_module = self.model.get_submodule(layer)
-            handle = sub_module.register_forward_hook(self._make_hook(layer))
-            self._handles[layer] = handle
-
-    def _make_hook(self, layer_name: str):
-        def hook(module: nn.Module, inputs: Tuple[Any, ...], output: Any):
-            self._features[layer_name] = output.detach() if self.detach else output
-        return hook
-
-    def clear(self):
-        self._features.clear()
-
-    @property
-    def features(self) -> Dict[str, Any]:
-        return dict(self._features)
-
-    def __call__(self, *args, **kwargs) -> Any:
-        self.clear()
-        return self.model(*args, **kwargs)
-
-    def remove_hooks(self):
-        for handle in self._handles.values():
-            handle.remove()
-        self._handles.clear()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.remove_hooks()
-
-    @staticmethod
-    def _expand_layers(model: nn.Module, layers: List[str]) -> List[str]:
-        all_layers = [name for name, _ in model.named_modules() if name]
-        all_layers_set = set(all_layers)
-        expanded = []
-        special_chars = set("*?[]")
-        for layer in layers:
-            if not any(char in layer for char in special_chars):
-                if layer not in all_layers_set:
-                    raise ValueError(f"Layer '{layer}' not found in the model.")
-                expanded.append(layer)
-            else:
-                matches = fnmatch.filter(all_layers, layer)
-                if not matches:
-                    raise ValueError(f"No layers match the pattern '{layer}'.")
-                expanded.extend(matches)
-        return expanded
 
 def load_transcript(path: str) -> pd.DataFrame:
     try:
@@ -233,7 +174,7 @@ def main(cfg: DictConfig):
     model.to(device)
     processor = AutoProcessor.from_pretrained(cfg.model)
     layers_to_extract = cfg.layers
-    extractor = HuggingFaceFeatureExtractor(model.encoder, layers_to_extract, detach=True)
+    extractor = FeatureExtractor(model.encoder, layers_to_extract, detach=True)
     sampling_rate = 16000
     extraction_fn_wrapper = lambda video, audio, transcript, verbose: extract_fn(video, audio, transcript, verbose, extractor, processor, model, device, sampling_rate)
     extract_features(parts=parts, movies_base=str(movies_base), transcripts_base=str(transcripts_base), output_dir=str(out_dir), extraction_fn=extraction_fn_wrapper, verbose=True, modality='audio', ood=True)

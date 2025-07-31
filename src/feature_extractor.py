@@ -1,5 +1,5 @@
 import fnmatch
-from typing import Any
+from typing import Any, List, Dict
 
 import torch
 from torch import nn
@@ -19,20 +19,20 @@ class FeatureExtractor:
         one_feat = features['blocks.1']
     """
 
-    def __init__(self, model: nn.Module, layers: list[str]):
+    def __init__(self, model: nn.Module, layers: list[str], detach: bool = True, call_fn=None):
         self.model = model
-        self.layers = layers
+        # self.layers = layers
+        self.detach = detach
+        self._call_fn = call_fn
 
-        all_layers = [name for name, _ in model.named_modules()]
-        self.expanded_layers = [
-            layer for pat in layers for layer in fnmatch.filter(all_layers, pat)
-        ]
+        self.layers = self._expand_layers(model, layers)
 
         self._features = {}
         self._handles = {}
+        self._register_hooks()
 
-        # register forward hooks for each layer
-        for layer in self.expanded_layers:
+    def _register_hooks(self):
+        for layer in self.layers:
             sub_module = self.model.get_submodule(layer)
             handle = sub_module.register_forward_hook(self._make_hook(layer))
             self._handles[layer] = handle
@@ -42,6 +42,9 @@ class FeatureExtractor:
             self._features[layer_name] = output
 
         return hook
+    
+    def clear(self):
+        self._features.clear()
 
     def get_features(self) -> dict[str, torch.Tensor]:
         """Get the last recorded features.."""
@@ -49,7 +52,7 @@ class FeatureExtractor:
 
     def forward(self, *args, **kwargs) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Forward the model and return the output and recorded features."""
-        self._features.clear()
+        self.clear()
         output = self.model(*args, **kwargs)
         features = self.get_features()
         return output, features
@@ -57,9 +60,38 @@ class FeatureExtractor:
     def __del__(self):
         for handle in self._handles.values():
             handle.remove()
+    
+    def __enter__(self):
+        """Enter context: hooks are already registered."""
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Exit context: remove all hooks."""
+        self.remove_hooks()
 
     __call__ = forward
 
+    @staticmethod
+    def _expand_layers(model: nn.Module, layers: List[str]) -> List[str]:
+        """
+        Expand a list of layer names and/or glob patterns to all matching module names
+        in the given model. Raises an error if a specified name or pattern doesn't match.
+        """
+        all_layers = [name for name, _ in model.named_modules() if name]  # skip the root module ''
+        all_layers_set = set(all_layers)
+        expanded = []
+        special_chars = set("*?[]")
+        for layer in layers:
+            if not any(char in layer for char in special_chars):
+                if layer not in all_layers_set:
+                    raise ValueError(f"Layer '{layer}' not found in the model.")
+                expanded.append(layer)
+            else:
+                matches = fnmatch.filter(all_layers, layer)
+                if not matches:
+                    raise ValueError(f"No layers match the pattern '{layer}'.")
+                expanded.extend(matches)
+        return expanded
 
 class FeatureAdaptiveAvgPool2d(nn.AdaptiveAvgPool2d):
     def __init__(
