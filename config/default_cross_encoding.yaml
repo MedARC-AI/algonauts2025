@@ -1,4 +1,4 @@
-out_dir: output/cross_encoding
+out_dir: output/cross_encoding_default
 
 model:
   embed_dim: 64
