@@ -24,108 +24,11 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 import dataclasses
 from enum import IntEnum, auto
 
+from feature_extractor import FeatureExtractor
+
 ROOT = Path(__file__).parent.parent
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_internvl3_features.yaml"
-
-
-
-class HuggingFaceFeatureExtractor:
-    """
-    A feature extractor for Hugging Face (or any PyTorch) models that captures
-    intermediate activations from any layer specified by exact name or glob pattern.
-
-    Example usage:
-        from transformers import BertModel
-        model = BertModel.from_pretrained("bert-base-uncased")
-        # Specify layers (using glob patterns is supported)
-        layers_to_extract = ["encoder.layer.*.output"]
-
-        # Using the extractor as a context manager ensures hooks are removed automatically.
-        with HuggingFaceFeatureExtractor(model, layers_to_extract, detach=True) as extractor:
-            # Perform a forward pass as usual
-            outputs = model(input_ids, attention_mask=mask)
-            # Get a copy of the extracted features
-            features = extractor.features
-            # Now 'features' is a dict mapping layer names to their activation tensors.
-    """
-
-    def __init__(self, model: nn.Module, layers: List[str], detach: bool = True):
-        self.model = model
-        self.detach = detach
-        # Expand layer patterns into full module names
-        self.layers = self._expand_layers(model, layers)
-        self._features: Dict[str, Any] = {}
-        self._handles: Dict[str, Any] = {}
-        self._register_hooks()
-
-    def _register_hooks(self):
-        """Register forward hooks on each specified layer."""
-        for layer in self.layers:
-            sub_module = self.model.get_submodule(layer)
-            handle = sub_module.register_forward_hook(self._make_hook(layer))
-            self._handles[layer] = handle
-
-    def _make_hook(self, layer_name: str):
-        def hook(module: nn.Module, inputs: Tuple[Any, ...], output: Any):
-            # Optionally detach to break the graph and save memory.
-            self._features[layer_name] = output.detach() if self.detach else output
-        return hook
-
-    def clear(self):
-        """Clear the stored features before a new forward pass."""
-        self._features.clear()
-
-    @property
-    def features(self) -> Dict[str, Any]:
-        """Return a copy of the captured features."""
-        return dict(self._features)
-
-    def __call__(self, *args, **kwargs) -> Any:
-        """
-        Run the model forward. This automatically clears previous features,
-        then performs a forward pass, capturing intermediate activations.
-        Returns the model's original output.
-        """
-        self.clear()
-        return self.model(*args, **kwargs)
-
-    def remove_hooks(self):
-        """Remove all registered hooks."""
-        for handle in self._handles.values():
-            handle.remove()
-        self._handles.clear()
-
-    def __enter__(self):
-        """Enter context: hooks are already registered."""
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Exit context: remove all hooks."""
-        self.remove_hooks()
-
-    @staticmethod
-    def _expand_layers(model: nn.Module, layers: List[str]) -> List[str]:
-        """
-        Expand a list of layer names and/or glob patterns to all matching module names
-        in the given model. Raises an error if a specified name or pattern doesn't match.
-        """
-        all_layers = [name for name, _ in model.named_modules() if name]  # skip the root module ''
-        all_layers_set = set(all_layers)
-        expanded = []
-        special_chars = set("*?[]")
-        for layer in layers:
-            if not any(char in layer for char in special_chars):
-                if layer not in all_layers_set:
-                    raise ValueError(f"Layer '{layer}' not found in the model.")
-                expanded.append(layer)
-            else:
-                matches = fnmatch.filter(all_layers, layer)
-                if not matches:
-                    raise ValueError(f"No layers match the pattern '{layer}'.")
-                expanded.extend(matches)
-        return expanded
-
 
 
 def load_transcript(
@@ -1331,9 +1234,7 @@ def main(cfg: DictConfig):
     )
     # print("loaded the model")
     layers_to_extract = cfg.layers
-    # print("extractor")
-    extractor = HuggingFaceFeatureExtractor(model, layers_to_extract, detach=True)
-    # print("extract features")
+    extractor = FeatureExtractor(model, layers_to_extract, detach=True)
     extract_features(parts = parts, movies_base = movies_base, transcripts_base = transcripts_base, output_dir = out_dir, extraction_fn = extract_fn, verbose = True, modality = 'all', past_context_in_seconds = cfg.past_context, splits_overlap=cfg.splits_overlap, ignore_done =[], ood=True)
 
 if __name__ == "__main__":

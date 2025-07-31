@@ -142,7 +142,7 @@ requires-dist = [
     { name = "datasets" },
     { name = "decord" },
     { name = "einops" },
-    { name = "flash-attn", specifier = ">=2.8.2" },
+    { name = "flash-attn" },
     { name = "huggingface-hub" },
     { name = "ipython" },
     { name = "jupyter" },
