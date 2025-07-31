@@ -1,41 +1,37 @@
 # Predicting Brain Responses to Natural Movies with Multimodal LLMs
+[[`ArXiv`](https://arxiv.org/abs/2507.19956)] [[`BibTeX`](#citation)]
 
-**Cesar Kadir Torrico Villanueva¹⁴\*, Jiaxin Cindy Tu¹²\*, Mihir Tripathy¹³\*, Connor Lane¹⁴\*, Rishab Iyer¹⁵, Paul S. Scotti¹⁴**
+Repository for MedARC group tackling the [Algonauts 2025 challenge](https://algonautsproject.com/).
 
-<br>
+## Installation
 
-¹Medical AI Research Center (MedARC)  
-²Psychological and Brain Sciences, Dartmouth College  
-³Core for Advanced Magnetic Resonance Imaging (CAMRI), Baylor College of Medicine  
-⁴Sophont  
-⁵Princeton Neuroscience Institute
-
----
-
-Repository for MedARC group tackling the [Algonauts 2025 challenge](https://algonautsproject.com/). 
-
-[[Preprint](https://arxiv.org/abs/2507.19956)]
-
-### Main Environment
-
-For the main application, run the following command. This will create a default `.venv` and install the project's primary dependencies from the lock file.
+Clone the repository, [install uv](https://docs.astral.sh/uv/getting-started/installation/), and then run
 
 ```sh
 uv sync
 ```
 
-### Feature Extraction Environment
+This will create a new virtual environment for the project with all the required dependencies. Activate the environment with
 
-If you need to run the feature extraction scripts, they require a separate environment with different dependencies.
+```bash
+source .venv/bin/activate
+```
 
-1.  **Create the environment** named `ext`:
-    ```sh
-    uv venv ext
-    ```
-2.  **Install its specific dependencies** using the `-p` flag to target the `ext` environment directly:
-    ```sh
-    uv pip install -r feat_ext_requirements.txt
-    ```
+or use `uv run`. See the [uv docs](https://docs.astral.sh/uv/getting-started/) for more details.
+
+### Flash attention
+
+Running feature extraction requires [flash attention 2](https://github.com/Dao-AILab/flash-attention). To install, download the precompiled binary release for our environment
+
+```sh
+wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiFALSE-cp311-cp311-linux_x86_64.wh
+```
+
+and then install with `uv pip`
+
+```sh
+uv pip install ./flash_attn-2.8.2+cu12torch2.7cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+```
 
 ## Data
 
@@ -45,7 +41,6 @@ Download the [official challenge dataset](https://github.com/courtois-neuromod/a
 
 Precomputed features extracted from a number of backbone models are available on [Huggingface](https://huggingface.co/datasets/medarc/algonauts_2025.features). Once you have downloaded the features, copy or link them under `datasets/` like so
 
-<!-- TODO: update with all features we used. -->
 
 ```
 datasets/
@@ -84,22 +79,18 @@ Llama-3.2-1B
 
 ### Manually Extracting Features
 
-If you want to extract features manually, the model-specific scripts are located in the [`feature_extraction/`](./feature_extraction/) directory.
+If you want to extract features manually, the model-specific scripts are located in the [`feature_extraction/`](./feature_extraction/) directory. To extract features for InternVL3 for example, run
 
-To run an extraction script, follow these steps:
+```sh
+uv run python feature_extraction/internvl3_video_features.py
+```
 
-1.  **Activate the feature extraction environment**
+<!-- Nb this runs but failed for my with this error
 
-    ```sh
-    source ext/bin/activate
-    ```
+```
+RuntimeError: Error loading audio from /home/connor/algonauts2025.release/datasets/algonauts_2025.competitors/stimuli/movies/ood/pulpfiction/task-pulpfiction1_video.mkv: Error opening '/home/connor/algonauts2025.release/datasets/algonauts_2025.competitors/stimuli/movies/ood/pulpfiction/task-pulpfiction1_video.mkv': Format not recognised.
+``` -->
 
-2.  **Run a script with its corresponding config**
-
-    ```sh
-    # This example is for the InternVL3 model
-    python feature_extraction/internvl3_video_features.py --cfg-path=config/default_internvl3_features.yaml
-    ```
 ## Training the default model
 
 To train the model using the [default config](config/default_feature_encoding.yaml), run
@@ -136,3 +127,16 @@ bash scripts/run_multiple_config_training.sh
 ```
 
 Ensemble the top predictions for each subject and parcel by running the notebook [prepare_stitching_submission.ipynb](prepare_stitching_submission.ipynb).
+
+## Citation
+
+If you find this repository useful, please consider giving a star :star: and citation:
+
+```
+@article{villanueva2025predicting,
+  title   = {Predicting Brain Responses To Natural Movies With Multimodal LLMs},
+  author  = {Villanueva, Cesar Kadir Torrico and Tu, Jiaxin Cindy and Tripathy, Mihir and Lane, Connor and Iyer, Rishab and Scotti, Paul S},
+  journal = {arXiv preprint arXiv:2507.19956},
+  year    = {2025}
+}
+```
