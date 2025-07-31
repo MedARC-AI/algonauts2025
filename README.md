@@ -19,20 +19,6 @@ source .venv/bin/activate
 
 or use `uv run`. See the [uv docs](https://docs.astral.sh/uv/getting-started/) for more details.
 
-### Flash attention
-
-Running feature extraction requires [flash attention 2](https://github.com/Dao-AILab/flash-attention). To install, download the precompiled binary release for our environment
-
-```sh
-wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiFALSE-cp311-cp311-linux_x86_64.wh
-```
-
-and then install with `uv pip`
-
-```sh
-uv pip install ./flash_attn-2.8.2+cu12torch2.7cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
-```
-
 ## Data
 
 Download the [official challenge dataset](https://github.com/courtois-neuromod/algonauts_2025.competitors), and copy or link it to `datasets/algonauts_2025.competitors`.

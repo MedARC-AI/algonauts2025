@@ -37,6 +37,7 @@ dependencies = [
     "einops",
     "torchaudio",
     "soundfile",
+    "flash-attn",
 ]
 
 
