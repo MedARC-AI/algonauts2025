@@ -1,5 +1,5 @@
 import fnmatch
-from typing import Any, List, Dict
+from typing import Any
 
 import torch
 from torch import nn
@@ -11,87 +11,65 @@ class FeatureExtractor:
     Args:
         model: torch model
         layers: list of layer names or glob patterns
+        call_fn: name of method to call instead of calling the model directly
 
     Example:
         extractor = FeatureExtractor(model, ['blocks.*', 'blocks.*.mlp.act'])
         output, features = extractor(input)
-
-        one_feat = features['blocks.1']
+        feat = features['blocks.1']
     """
 
-    def __init__(self, model: nn.Module, layers: list[str], detach: bool = True, call_fn=None):
+    def __init__(
+        self,
+        model: nn.Module,
+        layers: list[str],
+        call_fn: str | None = None,
+    ):
         self.model = model
-        # self.layers = layers
-        self.detach = detach
-        self._call_fn = call_fn
+        # expand layer glob patterns
+        all_layers = [name for name, _ in model.named_modules()]
+        self.layers = [
+            layer for pat in layers for layer in fnmatch.filter(all_layers, pat)
+        ]
+        self.call_fn = call_fn
 
-        self.layers = self._expand_layers(model, layers)
+        self.features = {}
+        self.handles = {}
 
-        self._features = {}
-        self._handles = {}
-        self._register_hooks()
-
-    def _register_hooks(self):
+        # register forward hooks for each layer
         for layer in self.layers:
             sub_module = self.model.get_submodule(layer)
-            handle = sub_module.register_forward_hook(self._make_hook(layer))
-            self._handles[layer] = handle
+            handle = sub_module.register_forward_hook(self.make_hook(layer))
+            self.handles[layer] = handle
 
-    def _make_hook(self, layer_name: str):
+    def make_hook(self, layer_name: str):
         def hook(module: nn.Module, inputs: tuple[Any, ...], output: Any):
-            self._features[layer_name] = output
+            self.features[layer_name] = output
 
         return hook
-    
+
+    def forward(self, *args, **kwargs) -> Any:
+        """Forward the model and return the original output."""
+        self.features.clear()
+        forward = getattr(self.model, self.call_fn) if self.call_fn else self.model
+        return forward(*args, **kwargs)
+
+    def forward_features(self, *args, **kwargs) -> dict[str, torch.Tensor]:
+        """Forward the model and return just the features."""
+        self.features.clear()
+        forward = getattr(self.model, self.call_fn) if self.call_fn else self.model
+        forward(*args, **kwargs)
+        return self.features.copy()
+
     def clear(self):
-        self._features.clear()
-
-    def get_features(self) -> dict[str, torch.Tensor]:
-        """Get the last recorded features.."""
-        return self._features.copy()
-
-    def forward(self, *args, **kwargs) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Forward the model and return the output and recorded features."""
-        self.clear()
-        output = self.model(*args, **kwargs)
-        features = self.get_features()
-        return output, features
+        self.features.clear()
 
     def __del__(self):
-        for handle in self._handles.values():
+        for handle in self.handles.values():
             handle.remove()
-    
-    def __enter__(self):
-        """Enter context: hooks are already registered."""
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Exit context: remove all hooks."""
-        self.remove_hooks()
 
     __call__ = forward
 
-    @staticmethod
-    def _expand_layers(model: nn.Module, layers: List[str]) -> List[str]:
-        """
-        Expand a list of layer names and/or glob patterns to all matching module names
-        in the given model. Raises an error if a specified name or pattern doesn't match.
-        """
-        all_layers = [name for name, _ in model.named_modules() if name]  # skip the root module ''
-        all_layers_set = set(all_layers)
-        expanded = []
-        special_chars = set("*?[]")
-        for layer in layers:
-            if not any(char in layer for char in special_chars):
-                if layer not in all_layers_set:
-                    raise ValueError(f"Layer '{layer}' not found in the model.")
-                expanded.append(layer)
-            else:
-                matches = fnmatch.filter(all_layers, layer)
-                if not matches:
-                    raise ValueError(f"No layers match the pattern '{layer}'.")
-                expanded.extend(matches)
-        return expanded
 
 class FeatureAdaptiveAvgPool2d(nn.AdaptiveAvgPool2d):
     def __init__(
