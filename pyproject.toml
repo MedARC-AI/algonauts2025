@@ -46,8 +46,3 @@ version_file = "src/_version.py"
 
 [tool.uv.sources]
 yaspy = { git = "https://github.com/childmindresearch/yaspy.git", rev = "629df8fe51fc085564b56ef2a2adddec869bfb9a" }
-
-[tool.ruff]
-extend-exclude = [
-    "feature_extraction/*.py",
-]

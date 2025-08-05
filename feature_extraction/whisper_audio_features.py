@@ -8,7 +8,7 @@ import fnmatch
 from typing import Any, Dict, List, Tuple, Callable, Union
 from torch import nn
 from PIL import Image
-import ast 
+import ast
 import torchaudio
 import cv2
 import torch
@@ -31,7 +31,7 @@ def load_transcript(path: str) -> pd.DataFrame:
     except Exception as e:
         raise RuntimeError(f"Error loading transcript from {path}: {e}")
 
-def load_audio(path: str, sampling_rate: int = 48000, stereo: bool = True) -> (torch.Tensor, int):
+def load_audio(path: str, sampling_rate: int = 48000, stereo: bool = True) -> tuple[torch.Tensor, int]:
     try:
         waveform, orig_sr = torchaudio.load(path)
         if not stereo and waveform.size(0) > 1:
@@ -174,7 +174,7 @@ def main(cfg: DictConfig):
     model.to(device)
     processor = AutoProcessor.from_pretrained(cfg.model)
     layers_to_extract = cfg.layers
-    extractor = FeatureExtractor(model.encoder, layers_to_extract, detach=True)
+    extractor = FeatureExtractor(model.encoder, layers_to_extract)
     sampling_rate = 16000
     extraction_fn_wrapper = lambda video, audio, transcript, verbose: extract_fn(video, audio, transcript, verbose, extractor, processor, model, device, sampling_rate)
     extract_features(parts=parts, movies_base=str(movies_base), transcripts_base=str(transcripts_base), output_dir=str(out_dir), extraction_fn=extraction_fn_wrapper, verbose=True, modality='audio', ood=True)

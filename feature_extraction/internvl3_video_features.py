@@ -9,7 +9,7 @@ import fnmatch
 from typing import Any, Dict, List, Tuple, Callable, Union
 from torch import nn
 from PIL import Image
-import ast 
+import ast
 import torchaudio
 import cv2
 import torch
@@ -23,6 +23,7 @@ import torchvision.transforms as T
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 import dataclasses
 from enum import IntEnum, auto
+from functools import partial
 
 from feature_extractor import FeatureExtractor
 
@@ -226,7 +227,7 @@ def extract_features(
                 total_iterations = math.ceil((num_splits / (1 - splits_overlap)) - 1)
                 # Create a HDF5 file to store the features.
                 with h5py.File(output_file, 'w') as f:
-                    features_datasets = {} 
+                    features_datasets = {}
                     # Extract features at each interval.
                     fixed_distance_interval = math.ceil(num_intervals_tr / num_splits)
                     for i in tqdm(range(total_iterations)):
@@ -1062,7 +1063,7 @@ def logits_by_pair(extractor, tokenizer,
     # 1) Build the text prompt
     # ------------------------------------------------------------------
     num_img_tokens = extractor.model.num_image_token  # K: one image -> K tokens
-    
+
     pair_chunks = []
     for i in range(n):
         # If sentences exist, use the corresponding one. Otherwise, use an empty list.
@@ -1071,7 +1072,7 @@ def logits_by_pair(extractor, tokenizer,
         pair_chunks.append(
             make_pair_chunk(current_words, num_img_tokens)
         )
-    
+
     body = '\n'.join(pair_chunks)
 
     if use_template:
@@ -1152,9 +1153,11 @@ def select_16_frames(video_section, target_frames=16):
     return selected_frames
 
 def extract_fn(
-    video: torch.Tensor, 
-    audio: torch.Tensor, 
-    transcript: List[List[str]], 
+    extractor: FeatureExtractor,
+    tokenizer: AutoTokenizer,
+    video: torch.Tensor,
+    audio: torch.Tensor,
+    transcript: List[List[str]],
     verbose: bool = True
 ) -> Dict[str, torch.Tensor]:
     """
@@ -1172,7 +1175,7 @@ def extract_fn(
     dict_return = {}
     with torch.no_grad():
         # Select the first frame of each chunk in the video batch
-        pixel_values = video[:, 0] 
+        pixel_values = video[:, 0]
         # Preprocess the images for the model
         pixel_values = load_image(pixel_values).to(torch.bfloat16).to(device)
 
@@ -1180,7 +1183,7 @@ def extract_fn(
         # Explicitly handle the case where the transcript is missing or empty.
         # If it's invalid, `sentences` becomes None.
         sentences = transcript if transcript and all(transcript) else None
-        
+
         # Call the feature extraction helper. It is designed to handle `sentences` being None.
         print("getting logits")
         logits, ranges, avg_logits = logits_by_pair(
@@ -1198,14 +1201,14 @@ def extract_fn(
             avg_activation = torch.stack([
                 activation[0, s:e+1].mean(dim=0)  # Mean over the sequence dimension
                 for (s, e) in ranges
-            ], dim=0)  
-            
+            ], dim=0)
+
             if verbose:
                 print(f"Layer: {layer_name}, Feature shape: {activation.shape}, Averaged feature shape: {avg_activation.shape}")
-            
+
             # Store the final, averaged features for the layer
             dict_return[layer_name] = avg_activation.to(torch.float16).cpu()
-            
+
     return dict_return
 
 
@@ -1234,7 +1237,8 @@ def main(cfg: DictConfig):
     )
     # print("loaded the model")
     layers_to_extract = cfg.layers
-    extractor = FeatureExtractor(model, layers_to_extract, detach=True)
+    extractor = FeatureExtractor(model, layers_to_extract)
+    extract_fn = partial(extract_fn, extractor, tokenizer)
     extract_features(parts = parts, movies_base = movies_base, transcripts_base = transcripts_base, output_dir = out_dir, extraction_fn = extract_fn, verbose = True, modality = 'all', past_context_in_seconds = cfg.past_context, splits_overlap=cfg.splits_overlap, ignore_done =[], ood=True)
 
 if __name__ == "__main__":
