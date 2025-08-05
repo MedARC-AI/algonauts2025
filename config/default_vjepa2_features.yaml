@@ -1,4 +1,4 @@
-out_dir: datasets/vjepa2_features
+out_dir: datasets/vjepa2
 feature_extraction_parts:
   - life
   - figures

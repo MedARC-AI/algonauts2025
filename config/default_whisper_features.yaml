@@ -1,4 +1,4 @@
-out_dir: datasets/whisper_features
+out_dir: datasets/whisper
 feature_extraction_parts:
   - life
   - figures
