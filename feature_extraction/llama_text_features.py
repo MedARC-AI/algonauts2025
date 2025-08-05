@@ -14,7 +14,7 @@ from feature_extractor import FeatureExtractor
 from utils import get_sha
 from data import parse_friends_run, parse_movie10_run
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parents[1]
 DEFAULT_DATA_DIR = ROOT / "datasets"
 DEFAULT_CONFIG = ROOT / "config/default_text_features.yaml"
 
@@ -94,7 +94,7 @@ def main(cfg: DictConfig):
 
     print(f"extracting from layers: {cfg.layers}")
     extractor = FeatureExtractor(model, cfg.layers)
-    print(f"expanded layers: {extractor.expanded_layers}")
+    print(f"expanded layers: {extractor.layers}")
 
     extract_features(
         transcript_tables,
@@ -189,7 +189,7 @@ def extract_features(
         input_ids = torch.from_numpy(token_dict["input_ids"]).to(device)
 
         with torch.autocast(device_type="cuda"):
-            _, unpooled_features = extractor(input_ids)
+            unpooled_features = extractor.forward_features(input_ids)
 
         features = {}
         for layer, feat in unpooled_features.items():

@@ -1,4 +1,4 @@
-out_dir: datasets/features.sharded
+out_dir: datasets/llama
 
 model: meta-llama/Llama-3.2-1B
 layers:

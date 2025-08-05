@@ -1,0 +1,44 @@
+out_dir: datasets/vjepa2
+feature_extraction_parts:
+  - life
+  - figures
+  - bourne
+  - wolf
+  - chaplin
+  - mononoke
+  - passepartout
+  - planetearth
+  - wot
+  - pulpfiction
+  - s1
+  - s2
+  - s3
+  - s4
+  - s5
+  - s6
+  - s7
+
+model: facebook/vjepa2-vitg-fpc64-256
+layers:
+  - encoder.layer.15.norm1
+  - encoder.layer.15.norm2
+  - encoder.layer.15.mlp.fc2
+  - encoder.layer.25.norm1
+  - encoder.layer.25.norm2
+  - encoder.layer.25.mlp.fc2
+  - encoder.layer.35.norm1
+  - encoder.layer.35.norm2
+  - encoder.layer.35.mlp.fc2
+  - encoder.layer.5.norm1
+  - encoder.layer.5.norm2
+  - encoder.layer.5.mlp.fc2
+  - encoder.layernorm
+
+dataset_dir: algonauts_2025.competitors/
+splits_overlap: 0.5
+past_context: 20
+num_frames: 15
+
+overwrite: true
+seed: 42
+device: cuda

@@ -1,4 +1,5 @@
-# MedARC Algonauts 2025 submission
+# Predicting Brain Responses to Natural Movies with Multimodal LLMs
+[[`ArXiv`](https://arxiv.org/abs/2507.19956)] [[`BibTeX`](#citation)]
 
 Repository for MedARC group tackling the [Algonauts 2025 challenge](https://algonautsproject.com/).
 
@@ -10,6 +11,14 @@ Clone the repository, [install uv](https://docs.astral.sh/uv/getting-started/ins
 uv sync
 ```
 
+This will create a new virtual environment for the project with all the required dependencies. Activate the environment with
+
+```bash
+source .venv/bin/activate
+```
+
+or use `uv run`. See the [uv docs](https://docs.astral.sh/uv/getting-started/) for more details.
+
 ## Data
 
 Download the [official challenge dataset](https://github.com/courtois-neuromod/algonauts_2025.competitors), and copy or link it to `datasets/algonauts_2025.competitors`.
@@ -18,7 +27,6 @@ Download the [official challenge dataset](https://github.com/courtois-neuromod/a
 
 Precomputed features extracted from a number of backbone models are available on [Huggingface](https://huggingface.co/datasets/medarc/algonauts_2025.features). Once you have downloaded the features, copy or link them under `datasets/` like so
 
-<!-- TODO: update with all features we used. -->
 
 ```
 datasets/
@@ -54,6 +62,20 @@ Llama-3.2-1B
     │   └── ood_chaplin2.h5
 ...
 ```
+
+### Manually Extracting Features
+
+If you want to extract features manually, the model-specific scripts are located in the [`feature_extraction/`](./feature_extraction/) directory. To extract features for InternVL3 for example, run
+
+```sh
+uv run python feature_extraction/internvl3_video_features.py
+```
+
+<!-- Nb this runs but failed for my with this error
+
+```
+RuntimeError: Error loading audio from /home/connor/algonauts2025.release/datasets/algonauts_2025.competitors/stimuli/movies/ood/pulpfiction/task-pulpfiction1_video.mkv: Error opening '/home/connor/algonauts2025.release/datasets/algonauts_2025.competitors/stimuli/movies/ood/pulpfiction/task-pulpfiction1_video.mkv': Format not recognised.
+``` -->
 
 ## Training the default model
 
@@ -91,3 +113,16 @@ bash scripts/run_multiple_config_training.sh
 ```
 
 Ensemble the top predictions for each subject and parcel by running the notebook [prepare_stitching_submission.ipynb](prepare_stitching_submission.ipynb).
+
+## Citation
+
+If you find this repository useful, please consider giving a star :star: and citation:
+
+```
+@article{villanueva2025predicting,
+  title   = {Predicting Brain Responses To Natural Movies With Multimodal LLMs},
+  author  = {Villanueva, Cesar Kadir Torrico and Tu, Jiaxin Cindy and Tripathy, Mihir and Lane, Connor and Iyer, Rishab and Scotti, Paul S},
+  journal = {arXiv preprint arXiv:2507.19956},
+  year    = {2025}
+}
+```

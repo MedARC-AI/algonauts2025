@@ -29,21 +29,15 @@ conv1dnext:
 
 features:
   internvl3_8b:
-    model: internvl3_8b_8bit
+    model: InternVL3_8B
     layers:
-      layers.10: language_model.model.layers.10.post_attention_layernorm
-      layers.15: language_model.model.layers.15.post_attention_layernorm
       layers.20: language_model.model.layers.20.post_attention_layernorm
-      norm: language_model.model.norm
 
   internvl3_14b:
     model: InternVL3_14B
     layers:
       layers.20: language_model.model.layers.20.post_attention_layernorm
       layers.30: language_model.model.layers.30.post_attention_layernorm
-      layers.40: language_model.model.layers.40.post_attention_layernorm
-      layers.47: language_model.model.layers.47.post_attention_layernorm
-      norm: language_model.model.norm
 
   qwen-2-5-omni-3b:
     model: qwen2-5_3B

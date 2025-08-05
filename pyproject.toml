@@ -26,12 +26,18 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "timm",
-    "torch==2.6.0",
+    "torch==2.7.1",
     "tqdm",
     "transformers",
     "wandb",
     "yaspy",
     "neuromaps",
+    "decord",
+    "opencv-python",
+    "einops",
+    "torchaudio",
+    "soundfile",
+    "flash-attn",
 ]
 
 
